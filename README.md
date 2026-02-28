@@ -91,42 +91,69 @@ In the TUI (`shan`), type `/` to access built-in commands:
 
 **Web Search & Research**
 ```bash
+shan "who is wayland zhang"
 shan "what happened in the news today"
 shan "compare React vs Vue for a new project"
 ```
 
-**File Operations**
+**File Operations** — `file_read`, `file_write`, `file_edit`, `glob`, `grep`, `directory_list`
 ```bash
 shan "find all TODO comments in this project"
 shan "read the main.go file and explain what it does"
+shan "list all files in the current directory"
 shan "create a .gitignore for a Go project"
 shan "replace all tabs with spaces in config.yaml"
+shan "search for any hardcoded passwords in the codebase"
 ```
 
-**Shell & System**
+**Shell & System** — `bash`, `system_info`, `process`
 ```bash
-shan "run the tests and fix any failures"
+shan "run go test and fix any failures"
 shan "what's using port 8080"
 shan "show my system info — CPU, memory, disk"
 shan "list all running node processes"
+shan -y "kill the process on port 3000"
 ```
 
-**macOS Automation** (use `-y` to auto-approve)
+**macOS App Control** — `applescript` (use `-y` to auto-approve)
+```bash
+shan -y "open Calculator"
+shan -y "open Safari and navigate to github.com"
+shan -y "open Finder and go to my Downloads folder"
+shan -y "set my Mac volume to 50%"
+shan -y "get the name of the frontmost application"
+```
+
+**Notifications & Clipboard** — `notify`, `clipboard`
+```bash
+shan -y "send me a notification saying 'Build complete!'"
+shan -y "copy the current date to my clipboard"
+shan -y "read my clipboard and summarize the content"
+```
+
+**Screenshot & Vision** — `screenshot`, `computer`
 ```bash
 shan -y "take a screenshot and tell me what's on my screen"
-shan -y "open Safari and navigate to github.com"
-shan -y "send me a notification when you're done"
-shan -y "copy the current date to my clipboard"
+shan -y "take a screenshot of just the frontmost window"
 shan -y "type 'Hello World' into the active text field"
+shan -y "click at coordinates 500, 300"
+shan -y "press command+shift+4"
 ```
 
-**Browser Automation**
+**Browser Automation** — `browser` (isolated Chrome via chromedp)
 ```bash
 shan -y "open https://news.ycombinator.com and get the top 5 stories"
 shan -y "navigate to waylandz.com and take a browser screenshot"
+shan -y "go to wikipedia.org, search for 'Shannon entropy', and summarize the page"
 ```
 
-**MCP Integrations** (requires MCP server config)
+**HTTP Requests** — `http`
+```bash
+shan "check if https://api.github.com is responding"
+shan "fetch https://httpbin.org/ip and show my public IP"
+```
+
+**MCP Integrations** (requires MCP server config in `~/.shannon/config.yaml`)
 ```bash
 shan "list my github repos"
 shan "create an issue in myrepo titled 'Bug: login fails'"
