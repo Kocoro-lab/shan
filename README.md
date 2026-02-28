@@ -118,8 +118,8 @@ shan -y "kill the process on port 3000"
 **macOS App Control** — `applescript` (use `-y` to auto-approve)
 ```bash
 shan -y "open Calculator"
-shan -y "open Safari and navigate to github.com"
-shan -y "open Finder and go to my Downloads folder"
+shan -y "use applescript to open Safari and navigate to github.com"
+shan -y "use applescript to open my Downloads folder in Finder"
 shan -y "set my Mac volume to 50%"
 shan -y "get the name of the frontmost application"
 ```
