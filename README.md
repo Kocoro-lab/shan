@@ -1,87 +1,75 @@
 # Shannon CLI (`shan`)
 
-Interactive AI agent CLI powered by Shannon. 16 local tools for computer control, MCP client for third-party integrations (GitHub, Slack, databases, etc.), and remote research/swarm orchestration via the Gateway API. macOS focused.
+Interactive AI agent CLI powered by Shannon. Local tools for computer control, MCP client for third-party integrations (GitHub, Slack, databases, etc.), and remote research/swarm orchestration via the Gateway API. macOS focused.
+
+## Installation
+
+### Option A: Install Script (Recommended)
+
+Downloads the latest release binary to `/usr/local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kocoro-lab/shan/main/install.sh | sh
+```
+
+### Option B: Build from Source
+
+Requires **Go 1.24+**:
+
+```bash
+git clone https://github.com/Kocoro-lab/shan.git
+cd shan
+go install -ldflags "-X github.com/Kocoro-lab/shan/cmd.Version=0.1.0" .
+```
+
+> **Note:** `go install` places the binary in `$GOPATH/bin` (default: `~/go/bin`).
+> Make sure this directory is in your PATH:
+> ```bash
+> # Add to your ~/.zshrc or ~/.bashrc if not already present:
+> export PATH="$HOME/go/bin:$PATH"
+> ```
+> Then restart your shell or run `source ~/.zshrc`.
+
+### Verify Installation
+
+```bash
+shan --help
+```
 
 ## Quick Start
 
 ```bash
-# Build from source
-go build -o shan .
+# Interactive mode — chat with Shannon in your terminal
+shan
 
-# Install to GOPATH
-go install -ldflags "-X github.com/Kocoro-lab/shan/cmd.Version=0.1.0" .
+# One-shot mode — ask a question and get an answer
+shan "who is wayland zhang"
 
-# Run
-shan                          # interactive TUI
-shan "explain main.go"        # one-shot mode
-shan -y "open Chrome"         # one-shot, auto-approve all tools
-shan mcp serve                # MCP server over stdio
-```
+# Let Shannon control your Mac — auto-approve tool calls
+shan -y "take a screenshot and tell me what's on my screen"
 
-Or install via script:
+# Research using web search
+shan "what happened in the news today"
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Kocoro-lab/shannon-cli/main/install.sh | sh
+# File operations
+shan "find all TODO comments in this project"
+
+# Configure your endpoint and API key
+shan --setup
 ```
 
 ## Requirements
 
-- **Go 1.24+** for building
 - **macOS** (clipboard, notifications, AppleScript, screencapture, Quartz mouse control)
 - **Shannon Gateway** at configurable endpoint (for LLM completions + remote tools)
-- **Python 3 + pyobjc-framework-Quartz** (for `computer` tool mouse/click control)
-- **Chrome** (for `browser` tool — chromedp with isolated profile)
-
-## Architecture
-
-```
-                         shan (Go binary)
-                              |
-        +----------+----------+----------+----------+
-        |          |          |          |          |
-  Agent Loop  MCP Server  MCP Client  Remote Orch  Local Tools
-  (chat loop) (stdio out) (stdio in)  (/research)  (16 tools)
-        |          |          |          |          |
-  POST /v1/   tools/list  Connect to  POST /api/  file, bash,
-  completions tools/call  external    tasks/stream applescript,
-  (Gateway)              MCP servers  (Gateway)   browser, ...
-        |          |          |          |
-  LLM returns  Exposes 16  GitHub,     Returns
-  text or      local tools Slack, DB,  workflow_id
-  function_call to clients filesystem       |
-        |                     |        SSE stream
-  If tool call:         Tools merged
-    - Permission check  into agent loop
-    - Pre-tool hook
-    - Execute locally or via MCP
-    - Post-tool hook
-    - Audit log
-    - Send result back
-    - Repeat (max 25 turns)
-        |
-  If text: display to user
-  Save to local session
-```
-
-### Data Flow Details
-
-- **Gateway Client** (`internal/client/gateway.go`): Sends `POST /v1/completions` with messages + tool schemas. Also handles task submission and server-side tool execution. 120s timeout.
-- **Agent Loop** (`internal/agent/loop.go`): Iterates LLM calls with permission checks, hooks, and audit logging at each step. Detects infinite loops (same tool+args 3x = forced text response). Accumulates token usage across turns. 5-layer token-budgeted system prompt.
-- **SSE Parser** (`internal/client/sse.go`): Spec-compliant SSE parser. Handles multi-line `data:` fields, 4MB buffer for large payloads.
-
-### Authentication
-
-| Service | Auth |
-|---------|------|
-| Gateway | API key via `X-API-Key` header |
-
-Configured via `api_key` in `~/.shannon/config.yaml` or `shan --setup`.
+- **Python 3 + pyobjc-framework-Quartz** (optional, for `computer` tool mouse/click control)
+- **Chrome** (optional, for `browser` tool — chromedp with isolated profile)
 
 ## CLI Usage
 
 ```bash
 shan                              # interactive TUI
-shan "query"                      # one-shot mode (prompts for tool approval)
+shan "who is wayland zhang"       # one-shot mode (prompts for tool approval)
 shan -y "query"                   # one-shot, auto-approve all tools
 shan --setup                      # configure endpoint + API key
 shan mcp serve                    # start MCP server over stdio
@@ -116,18 +104,18 @@ Type `/` in the TUI to see the interactive command menu:
 
 ## Local Tools
 
-16 local tools executed on your macOS machine:
+Local tools executed on your macOS machine:
 
 ### File Operations
 
 | Tool | Approval | Description |
 |------|----------|-------------|
-| `file_read` | No | Read files with line numbers, supports offset/limit |
+| `file_read` | CWD auto | Read files with line numbers, supports offset/limit |
 | `file_write` | Yes | Write/create files, creates parent dirs |
 | `file_edit` | Yes | Find-and-replace (old_string must be unique) |
-| `glob` | No | Find files by pattern (supports `**` recursive) |
-| `grep` | No | Search file contents (ripgrep, falls back to grep) |
-| `directory_list` | No | List directory contents with sizes |
+| `glob` | CWD auto | Find files by pattern (supports `**` recursive) |
+| `grep` | CWD auto | Search file contents (ripgrep, falls back to grep) |
+| `directory_list` | CWD auto | List directory contents with sizes |
 
 ### System & Shell
 
@@ -162,6 +150,7 @@ Tool call from LLM
 ```
 
 - **Hard-blocked**: `rm -rf /`, `mkfs`, `dd if=`, `curl|sh`, etc. — always denied, cannot be overridden
+- **CWD auto-approve**: Read-only tools (`file_read`, `glob`, `grep`, `directory_list`) auto-approve paths under the current working directory
 - **Auto-approve**: Safe bash commands (`ls`, `git status`, `go test`, `make`, etc.), `process list/ports`, localhost HTTP
 - **Prompt**: Destructive tools show `[y/n]` in TUI or one-shot mode
 - **`-y` flag**: Auto-approves everything in one-shot mode
@@ -214,18 +203,21 @@ Hook protocol:
 - Receives JSON on stdin with tool name, arguments, result
 - Exit 0 = allow, exit 2 = deny (PreToolUse only)
 - 10s timeout, 10KB output limit
+- Hook commands must use absolute paths or `./` prefix (bare command names are rejected for security)
 
 ## MCP Server
 
-Expose all 16 local tools to MCP clients via JSON-RPC 2.0 over stdio:
+Expose local tools to MCP clients via JSON-RPC 2.0 over stdio:
 
 ```bash
 shan mcp serve
 ```
 
+The MCP server enforces the same permission engine, hooks, and audit logging as the interactive CLI. Tools requiring approval are denied in MCP mode (no interactive TTY).
+
 Supported methods:
 - `initialize` — handshake with protocol version
-- `tools/list` — returns all 16 tool schemas
+- `tools/list` — returns all tool schemas
 - `tools/call` — execute a tool by name with arguments
 
 Example:
@@ -260,7 +252,7 @@ mcp_servers:
 ```bash
 shan "list my github repos"
 shan "create an issue in myrepo titled 'Bug: login fails'"
-shan "show open PRs in shannon-cli"
+shan "show open PRs in shan"
 ```
 
 ### Slack
@@ -597,65 +589,6 @@ Remote workflows (`/research`, `/swarm`) stream events via SSE:
 | Escape | Menu/picker | Close |
 | y/n | Approval prompt | Approve/deny tool call |
 | Ctrl+C | Any | Save session and exit |
-
-## Project Structure
-
-```
-shannon-cli/
-  main.go                           Entry point
-  cmd/root.go                       Cobra CLI, one-shot mode, MCP serve subcommand
-  internal/
-    agent/
-      loop.go                       Agent loop with permissions, hooks, audit
-      tools.go                      Tool/SafeChecker interfaces, ToolRegistry
-    client/
-      gateway.go                    Gateway client (completions, tools, tasks)
-      sse.go                        SSE parser (spec-compliant, 4MB buffer)
-    config/
-      config.go                     Multi-level YAML config (global/project/local)
-      settings.go                   UI settings (JSON)
-    session/
-      store.go                      JSON file persistence
-      manager.go                    Session lifecycle, ID generation
-    permissions/
-      permissions.go                5-layer permission engine, hard-block, symlink protection
-    audit/
-      audit.go                      JSON-lines logger, auto-redact secrets
-    hooks/
-      hooks.go                      PreToolUse/PostToolUse/SessionStart/Stop
-    instructions/
-      loader.go                     Instructions, memory, custom command loading
-    prompt/
-      builder.go                    5-layer token-budgeted system prompt builder
-    mcp/
-      server.go                     MCP server (JSON-RPC 2.0 over stdio)
-      client.go                     MCP client manager (connect to external servers)
-    tools/
-      file_read.go                  Read with line numbers
-      file_write.go                 Write with mkdir -p
-      file_edit.go                  Unique string replacement
-      bash.go                       Shell exec with SafeChecker
-      grep.go                       ripgrep/grep fallback
-      glob.go                       doublestar recursive patterns
-      directory_list.go             Directory listing
-      http.go                       HTTP client with network allowlist
-      system_info.go                OS/CPU/memory/disk info
-      clipboard.go                  pbcopy/pbpaste
-      notify.go                     macOS notifications
-      process.go                    ps/lsof/kill
-      applescript.go                Arbitrary AppleScript
-      browser.go                    Chromedp isolated Chrome
-      screenshot.go                 macOS screencapture
-      computer.go                   Mouse/keyboard via Quartz/System Events
-      mcp_tool.go                   MCP tool adapter (wraps remote tools)
-      register.go                   Tool registration (local + MCP + gateway)
-    tui/
-      app.go                        Bubbletea TUI
-    update/
-      selfupdate.go                 GitHub release self-update
-  test/
-    integration_test.go             E2E test with mock server
-```
 
 ## Building & Testing
 
