@@ -74,7 +74,20 @@ shan "who is wayland zhang"
 shan --setup
 ```
 
-### Usage Examples
+### Interactive Commands
+
+In the TUI (`shan`), type `/` to access built-in commands:
+
+```bash
+/research deep "latest advances in AI agents"    # deep research via Gateway
+/swarm "build a marketing plan for our launch"   # multi-agent orchestration
+/model large                                      # switch to large model
+/copy                                             # copy last response to clipboard
+/sessions                                         # browse and resume past sessions
+/session new                                      # start a fresh session
+```
+
+### One-Shot Examples
 
 **Web Search & Research**
 ```bash
@@ -119,19 +132,6 @@ shan "list my github repos"
 shan "create an issue in myrepo titled 'Bug: login fails'"
 shan "search slack for messages about deployment"
 shan "show all tables in the database"
-```
-
-### Interactive Commands
-
-In the TUI (`shan`), type `/` to access built-in commands:
-
-```bash
-/research deep "latest advances in AI agents"    # deep research via Gateway
-/swarm "build a marketing plan for our launch"   # multi-agent orchestration
-/model large                                      # switch to large model
-/copy                                             # copy last response to clipboard
-/sessions                                         # browse and resume past sessions
-/session new                                      # start a fresh session
 ```
 
 ## Requirements
