@@ -44,7 +44,7 @@ Shannon CLI requires a Gateway API for LLM completions and remote tools.
 
 ```bash
 shan --setup
-# Enter endpoint: https://api.shannon.run
+# Enter endpoint: https://api-dev.shannon.run
 # Enter API key: <your key from shannon.run>
 ```
 
