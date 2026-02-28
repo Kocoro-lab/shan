@@ -1,0 +1,10 @@
+shan
+*.exe
+.DS_Store
+.shannon/
+*.env
+.env*
+*.pem
+*.key
+*.p12
+*.log
