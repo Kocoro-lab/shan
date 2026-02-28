@@ -123,7 +123,7 @@ shan -y "type 'Hello World' into the active text field"
 **Browser Automation**
 ```bash
 shan -y "open https://news.ycombinator.com and get the top 5 stories"
-shan -y "navigate to example.com and take a browser screenshot"
+shan -y "navigate to waylandz.com and take a browser screenshot"
 ```
 
 **MCP Integrations** (requires MCP server config)
