@@ -13,9 +13,15 @@ type ToolInfo struct {
 	Required    []string
 }
 
+type ImageBlock struct {
+	MediaType string // e.g. "image/png"
+	Data      string // base64-encoded
+}
+
 type ToolResult struct {
 	Content string
 	IsError bool
+	Images  []ImageBlock
 }
 
 type Tool interface {

@@ -51,3 +51,19 @@ func (m *mockTool) Run(ctx context.Context, args string) (ToolResult, error) {
 }
 
 func (m *mockTool) RequiresApproval() bool { return false }
+
+func TestToolResult_ImagesField(t *testing.T) {
+	result := ToolResult{
+		Content: "Screenshot captured",
+		IsError: false,
+		Images: []ImageBlock{
+			{MediaType: "image/png", Data: "iVBORfakedata"},
+		},
+	}
+	if len(result.Images) != 1 {
+		t.Errorf("expected 1 image, got %d", len(result.Images))
+	}
+	if result.Images[0].MediaType != "image/png" {
+		t.Errorf("expected image/png, got %s", result.Images[0].MediaType)
+	}
+}
