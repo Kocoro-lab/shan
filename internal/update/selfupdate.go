@@ -9,7 +9,7 @@ import (
 )
 
 const repoOwner = "Kocoro-lab"
-const repoName = "shannon-cli"
+const repoName = "shan"
 
 func CheckForUpdate(currentVersion string) (*selfupdate.Release, bool, error) {
 	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="Kocoro-lab/shannon-cli"
+REPO="Kocoro-lab/shan"
 INSTALL_DIR="/usr/local/bin"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -21,9 +21,9 @@ if [ -z "$LATEST" ]; then
     exit 1
 fi
 
-echo "Installing shannon-cli v${LATEST}..."
+echo "Installing shan v${LATEST}..."
 
-FILENAME="shannon-cli_${LATEST}_${OS}_${ARCH}.tar.gz"
+FILENAME="shan_${LATEST}_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/v${LATEST}/${FILENAME}"
 
 TMP=$(mktemp -d)
