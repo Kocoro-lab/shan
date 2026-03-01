@@ -97,15 +97,18 @@ func formatExpandedToolResult(toolName string, args string, isError bool, conten
 	compact := formatCompactToolResult(toolName, args, isError, content, elapsed)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 
+	// Flatten newlines so expanded view stays compact
+	flat := strings.Join(strings.Fields(content), " ")
+
 	var sb strings.Builder
 	sb.WriteString(compact)
 	sb.WriteString("\n")
 	sb.WriteString(dimStyle.Render(fmt.Sprintf("  Args: %s", truncate(args, 200))))
 	sb.WriteString("\n")
 	if isError {
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(fmt.Sprintf("  Error: %s", truncate(content, 500))))
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(fmt.Sprintf("  Error: %s", truncate(flat, 200))))
 	} else {
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("  Result: %s", truncate(content, 500))))
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  Result: %s", truncate(flat, 200))))
 	}
 	return sb.String()
 }

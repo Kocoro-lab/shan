@@ -7,7 +7,8 @@ import (
 	"github.com/charmbracelet/glamour"
 )
 
-var blankLineRe = regexp.MustCompile(`\n{3,}`)
+// Matches 2+ consecutive blank-looking lines (may contain whitespace or ANSI escapes)
+var blankLineRe = regexp.MustCompile(`(\n[ \t]*(\x1b\[[0-9;]*m)*[ \t]*){3,}`)
 
 var mdRenderer *glamour.TermRenderer
 
