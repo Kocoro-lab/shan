@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"regexp"
+	"strings"
+
 	"github.com/charmbracelet/glamour"
 )
+
+var blankLineRe = regexp.MustCompile(`\n{3,}`)
 
 var mdRenderer *glamour.TermRenderer
 
@@ -26,5 +31,7 @@ func renderMarkdown(text string) string {
 	if err != nil {
 		return text
 	}
+	out = blankLineRe.ReplaceAllString(out, "\n\n")
+	out = strings.TrimRight(out, "\n")
 	return out
 }
