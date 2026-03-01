@@ -140,13 +140,19 @@ type cliEventHandler struct {
 }
 
 func (h *cliEventHandler) OnToolCall(name string, args string) {
-	fmt.Printf("  Tool: %s\n", name)
+	// Deferred — prints on OnToolResult
 }
 
 func (h *cliEventHandler) OnToolResult(name string, args string, result agent.ToolResult, elapsed time.Duration) {
+	icon := "✓"
 	if result.IsError {
-		fmt.Printf("  Error: %s\n", result.Content)
+		icon = "✗"
 	}
+	brief := ""
+	if elapsed > 100*time.Millisecond {
+		brief = fmt.Sprintf("  (%.1fs)", elapsed.Seconds())
+	}
+	fmt.Printf("  ⏵ %s  %s%s\n", name, icon, brief)
 }
 
 func (h *cliEventHandler) OnText(text string) {}

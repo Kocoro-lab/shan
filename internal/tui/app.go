@@ -349,6 +349,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Ctrl+O: expand last tool result
+		if m.state == stateInput && msg.String() == "ctrl+o" && len(m.lastToolResults) > 0 {
+			last := m.lastToolResults[len(m.lastToolResults)-1]
+			expanded := formatExpandedToolResult(last.name, last.args, last.isError, last.content, last.elapsed)
+			m.appendOutput(expanded)
+			return m, m.flushPrints()
+		}
+
 		if m.state == stateSessionPicker {
 			switch msg.Type {
 			case tea.KeyUp:
