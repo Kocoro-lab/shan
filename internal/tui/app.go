@@ -65,8 +65,11 @@ type streamOutputMsg struct {
 	text string
 }
 
-// spinnerTickMsg rotates the spinner text
+// spinnerTickMsg is a slow fallback that advances spinner phrase text
 type spinnerTickMsg struct{}
+
+// spinnerFrameMsg drives fast glyph + color animation (~100ms)
+type spinnerFrameMsg struct{}
 
 // streamDeltaMsg carries an incremental text chunk from SSE streaming.
 type streamDeltaMsg struct {
@@ -101,6 +104,8 @@ type Model struct {
 	streamingDone  bool
 	spinnerIdx     int
 	spinnerTexts   []string
+	glyphIdx       int
+	colorIdx       int
 	lastSessions      []session.SessionSummary // cached for session picker
 	sessionPickerIdx  int
 	state         state
@@ -428,6 +433,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetWidth(msg.Width)
 		return m, nil
 
+	case spinnerFrameMsg:
+		if m.state == stateProcessing {
+			m.glyphIdx++
+			m.colorIdx++
+			return m, spinnerFrameTick()
+		}
+		return m, nil
+
 	case spinnerTickMsg:
 		if m.state == stateProcessing {
 			m.spinnerIdx = (m.spinnerIdx + 1) % len(m.spinnerTexts)
@@ -513,6 +526,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.pendingToolName = msg.name
 		m.pendingToolArgs = msg.args
+		// Advance spinner phrase on real events
+		m.spinnerIdx = (m.spinnerIdx + 1) % len(m.spinnerTexts)
 		return m, nil
 
 	case clipboardResultMsg:
@@ -559,13 +574,19 @@ func (m *Model) View() string {
 		if m.streamingText != "" {
 			sb.WriteString(m.streamingText)
 		} else if m.pendingToolName != "" {
+			glyph := dotFrames[m.glyphIdx%len(dotFrames)]
+			color := spinColors[m.colorIdx%len(spinColors)]
+			glyphStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
 			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 			keyArg := toolKeyArg(m.pendingToolName, m.pendingToolArgs)
-			sb.WriteString(dimStyle.Render(fmt.Sprintf("⏵ %s(%s)...", m.pendingToolName, keyArg)))
+			sb.WriteString(glyphStyle.Render(glyph) + dimStyle.Render(fmt.Sprintf(" %s(%s)", m.pendingToolName, keyArg)))
 		} else {
-			spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+			glyph := dotFrames[m.glyphIdx%len(dotFrames)]
+			color := spinColors[m.colorIdx%len(spinColors)]
+			glyphStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+			textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 			spinnerText := m.spinnerTexts[m.spinnerIdx%len(m.spinnerTexts)]
-			sb.WriteString(spinnerStyle.Render("* " + spinnerText))
+			sb.WriteString(glyphStyle.Render(glyph) + " " + textStyle.Render(spinnerText))
 		}
 	case stateApproval:
 		sb.WriteString(bar)
@@ -625,7 +646,9 @@ func (m *Model) handleSubmit() (tea.Model, tea.Cmd) {
 	sess.Messages = append(sess.Messages, client.Message{Role: "user", Content: client.NewTextContent(input)})
 
 	m.spinnerIdx = 0
-	return m, tea.Batch(m.runAgentLoop(input, sess.Messages[:len(sess.Messages)-1]), spinnerTick())
+	m.glyphIdx = 0
+	m.colorIdx = 0
+	return m, tea.Batch(m.runAgentLoop(input, sess.Messages[:len(sess.Messages)-1]), spinnerTick(), spinnerFrameTick())
 }
 
 func (m *Model) runAgentLoop(query string, history []client.Message) tea.Cmd {
@@ -694,8 +717,20 @@ func (m *Model) flushPrints() tea.Cmd {
 	}
 }
 
+// Braille dot spinner frames (MiniDot style)
+var dotFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// Color gradient: purple → blue → cyan → white (ANSI 256 codes)
+var spinColors = []string{"99", "105", "111", "117", "123", "159", "195", "231"}
+
+func spinnerFrameTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinnerFrameMsg{}
+	})
+}
+
 func spinnerTick() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
 }
@@ -813,12 +848,14 @@ func (m *Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			// Send as a regular user message through the agent loop
 			m.state = stateProcessing
 			m.spinnerIdx = 0
+			m.glyphIdx = 0
+			m.colorIdx = 0
 			sess := m.sessions.Current()
 			var history []client.Message
 			if sess != nil {
 				history = sess.Messages
 			}
-			return m, tea.Batch(m.runAgentLoop(expandedPrompt, history), spinnerTick())
+			return m, tea.Batch(m.runAgentLoop(expandedPrompt, history), spinnerTick(), spinnerFrameTick())
 		}
 		m.appendOutput(fmt.Sprintf("Unknown command: %s (type /help)", cmd))
 	}
@@ -845,9 +882,11 @@ func (m *Model) handleResearch(args []string) (tea.Model, tea.Cmd) {
 
 	m.state = stateProcessing
 	m.spinnerIdx = 0
+	m.glyphIdx = 0
+	m.colorIdx = 0
 	m.appendOutput(fmt.Sprintf("Starting %s research...", strategy))
 
-	return m, tea.Batch(m.runRemote(query, map[string]any{"force_research": true}, strategy), spinnerTick())
+	return m, tea.Batch(m.runRemote(query, map[string]any{"force_research": true}, strategy), spinnerTick(), spinnerFrameTick())
 }
 
 func (m *Model) handleSwarm(args []string) (tea.Model, tea.Cmd) {
@@ -859,9 +898,11 @@ func (m *Model) handleSwarm(args []string) (tea.Model, tea.Cmd) {
 
 	m.state = stateProcessing
 	m.spinnerIdx = 0
+	m.glyphIdx = 0
+	m.colorIdx = 0
 	m.appendOutput("Starting swarm workflow...")
 
-	return m, tea.Batch(m.runRemote(query, map[string]any{"force_swarm": true}, ""), spinnerTick())
+	return m, tea.Batch(m.runRemote(query, map[string]any{"force_swarm": true}, ""), spinnerTick(), spinnerFrameTick())
 }
 
 func (m *Model) runRemote(query string, ctx map[string]any, strategy string) tea.Cmd {
