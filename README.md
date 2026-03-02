@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/Kocoro-lab/shan/main/install.sh | s
 
 ### Option C: Build from Source
 
-Requires **Go 1.24+**:
+Requires **Go 1.25+**:
 
 ```bash
 git clone https://github.com/Kocoro-lab/shan.git
@@ -137,13 +137,12 @@ shan -y "copy the current date to my clipboard"
 shan -y "read my clipboard and summarize the content"
 ```
 
-**Screenshot & Vision** — `screenshot`, `computer`
+**Screenshot & Computer Use** — `screenshot`, `computer` (vision loop: act → screenshot → observe → decide)
 ```bash
 shan -y "take a screenshot and tell me what's on my screen"
-shan -y "take a screenshot of just the frontmost window"
-shan -y "type 'Hello World' into the active text field"
-shan -y "click at coordinates 500, 300"
-shan -y "press command+shift+4"
+shan -y "open LINE app and bring it to the front"
+shan -y "open Chrome, search for 'vivaia', and list the first 5 results"
+shan -y "click on the Finder icon in the dock"
 ```
 
 **Browser Automation** — `browser` (isolated Chrome via chromedp)
@@ -189,6 +188,7 @@ shan mcp serve                    # start MCP server over stdio
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--yes` | `-y` | Auto-approve all tool calls in one-shot mode |
+| `--dangerously-skip-permissions` | | Skip all permission checks in interactive mode |
 | `--setup` | | Run interactive setup wizard |
 
 ## Commands
@@ -241,9 +241,9 @@ Local tools executed on your macOS machine:
 |------|----------|-------------|
 | `clipboard` | Yes | Read/write system clipboard (pbcopy/pbpaste) |
 | `notify` | Yes | macOS desktop notifications via osascript |
-| `applescript` | Yes | Execute arbitrary AppleScript |
-| `screenshot` | Yes | Screen capture (fullscreen/window/region) |
-| `computer` | Yes | OS-level mouse/keyboard (click/type/hotkey/move) |
+| `applescript` | Yes | Execute arbitrary AppleScript (auto-screenshots after execution) |
+| `screenshot` | Yes | Screen capture (fullscreen/window/region), resized and base64-encoded for LLM vision |
+| `computer` | Yes | OS-level mouse/keyboard with Anthropic `computer_20251124` schema (auto-screenshots after each action, coordinate scaling for retina) |
 | `browser` | Yes | Chromedp with isolated Chrome profile (navigate/click/type/screenshot/read_page/execute_js/wait/close) |
 
 ### Tool Approval Flow
