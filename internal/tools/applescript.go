@@ -67,7 +67,7 @@ func (t *AppleScriptTool) Run(ctx context.Context, argsJSON string) (agent.ToolR
 	// Auto-screenshot after GUI actions so the LLM can verify the outcome.
 	// Brief delay to let the UI settle.
 	time.Sleep(500 * time.Millisecond)
-	_, block, captureErr := CaptureAndEncode(MaxScreenshotDim)
+	_, block, captureErr := CaptureAndEncode(DefaultAPIWidth)
 	if captureErr == nil {
 		toolResult.Images = []agent.ImageBlock{block}
 	}

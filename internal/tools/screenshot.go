@@ -77,7 +77,7 @@ func (t *ScreenshotTool) Run(ctx context.Context, argsJSON string) (agent.ToolRe
 	}
 
 	// Resize and encode for LLM vision
-	if err := ResizeImage(path, MaxScreenshotDim); err != nil {
+	if err := ResizeImage(path, DefaultAPIWidth); err != nil {
 		// Non-fatal: screenshot saved but resize failed
 		return agent.ToolResult{Content: fmt.Sprintf("Screenshot saved to: %s (resize failed: %v)", path, err)}, nil
 	}

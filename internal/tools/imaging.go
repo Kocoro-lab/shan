@@ -15,7 +15,6 @@ import (
 const (
 	DefaultAPIWidth  = 1280
 	DefaultAPIHeight = 800
-	MaxScreenshotDim = 1200
 )
 
 // EncodeImage reads a PNG/JPEG file and returns it as a base64-encoded ImageBlock.
