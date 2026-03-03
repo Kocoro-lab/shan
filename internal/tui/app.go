@@ -126,6 +126,7 @@ type Model struct {
 	serverToolErr        error // non-nil if server tools failed to load
 	customCommands       map[string]string // name → prompt content from commands/*.md
 	bypassPermissions    bool
+	cancelRun            context.CancelFunc // cancels the running agent loop
 	// Tool result display
 	pendingToolName   string
 	pendingToolArgs   string
@@ -380,6 +381,35 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case tea.KeyEscape:
+			if m.state == stateProcessing || m.state == stateApproval {
+				if m.cancelRun != nil {
+					m.cancelRun()
+					m.cancelRun = nil
+				}
+				// Unblock approval goroutine if waiting
+				if m.state == stateApproval {
+					select {
+					case m.approvalCh <- false:
+					default:
+					}
+				}
+				// Flush any partial streaming text to scrollback
+				if m.streamingText != "" {
+					m.appendOutput(truncateLongResponse(renderMarkdown(m.streamingText, m.width)))
+					m.streamingText = ""
+				}
+				m.streamingDone = false
+				// Roll back the user message added in handleSubmit
+				sess := m.sessions.Current()
+				if len(sess.Messages) > 0 && sess.Messages[len(sess.Messages)-1].Role == "user" {
+					sess.Messages = sess.Messages[:len(sess.Messages)-1]
+				}
+				m.sessions.Save()
+				cancelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+				m.appendOutput(cancelStyle.Render("  [Cancelled]"))
+				m.state = stateInput
+				return m, nil
+			}
 			if m.menuVisible {
 				m.menuVisible = false
 				return m, nil
@@ -504,25 +534,34 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case agentDoneMsg:
+		// If already back to stateInput (Esc was pressed), ignore this message.
+		// The Esc handler already showed [Cancelled] and transitioned state.
+		if m.state != stateProcessing {
+			return m, nil
+		}
 		m.state = stateInput
+		m.cancelRun = nil
 		if m.streamingText != "" {
 			m.appendOutput(truncateLongResponse(renderMarkdown(m.streamingText, m.width)))
 			m.streamingText = ""
 		}
-		if msg.err != nil {
+		if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
 			m.appendOutput("Error: " + msg.err.Error())
 		}
-		elapsed := formatElapsed(time.Since(m.processingStartTime))
-		usageDim := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-		if msg.usage != nil {
-			usageStr := fmt.Sprintf("  tokens: %d | cost: $%.4f", msg.usage.TotalTokens, msg.usage.CostUSD)
-			if msg.usage.Model != "" {
-				usageStr += " | model: " + msg.usage.Model
+		// Don't show usage/elapsed for cancelled tasks
+		if msg.err == nil || errors.Is(msg.err, agent.ErrMaxIterReached) {
+			elapsed := formatElapsed(time.Since(m.processingStartTime))
+			usageDim := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+			if msg.usage != nil {
+				usageStr := fmt.Sprintf("  tokens: %d | cost: $%.4f", msg.usage.TotalTokens, msg.usage.CostUSD)
+				if msg.usage.Model != "" {
+					usageStr += " | model: " + msg.usage.Model
+				}
+				usageStr += " | " + elapsed
+				m.appendOutput(usageDim.Render(usageStr))
+			} else {
+				m.appendOutput(usageDim.Render("  " + elapsed))
 			}
-			usageStr += " | " + elapsed
-			m.appendOutput(usageDim.Render(usageStr))
-		} else {
-			m.appendOutput(usageDim.Render("  " + elapsed))
 		}
 		m.sessions.Save()
 		return m, nil
@@ -743,11 +782,13 @@ func (m *Model) handleSubmit() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) runAgentLoop(query string, history []client.Message) tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelRun = cancel
 	return func() tea.Msg {
 		handler := &tuiEventHandler{model: m}
 		m.agentLoop.SetHandler(handler)
 
-		result, usage, err := m.agentLoop.Run(context.Background(), query, history)
+		result, usage, err := m.agentLoop.Run(ctx, query, history)
 		if result != "" && (err == nil || errors.Is(err, agent.ErrMaxIterReached)) {
 			sess := m.sessions.Current()
 			sess.Messages = append(sess.Messages, client.Message{Role: "assistant", Content: client.NewTextContent(result)})
