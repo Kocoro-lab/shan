@@ -626,3 +626,37 @@ func TestAgentLoop_ErrorAwareBreaking(t *testing.T) {
 		t.Errorf("expected 7 LLM calls (6 tool + 1 forced), got %d", callCount)
 	}
 }
+
+func TestAgentLoop_ContextCancellation(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		// Small delay per request so cancellation fires before maxIter
+		time.Sleep(20 * time.Millisecond)
+		// Always return tool calls to keep the loop running
+		json.NewEncoder(w).Encode(nativeResponse("", "tool_use",
+			toolCall("mock_tool", fmt.Sprintf(`{"step":%d}`, callCount)), 10, 5))
+	}))
+	defer server.Close()
+
+	gw := client.NewGatewayClient(server.URL, "")
+	reg := NewToolRegistry()
+	reg.Register(&mockTool{name: "mock_tool"})
+	loop := NewAgentLoop(gw, reg, "medium", "", 25, 2000, 200, nil, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after a short delay to let a few iterations run
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	_, _, err := loop.Run(ctx, "long task", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	// Should have stopped well before maxIter=25
+	if callCount >= 25 {
+		t.Errorf("expected loop to exit early due to cancellation, but made %d calls", callCount)
+	}
+}

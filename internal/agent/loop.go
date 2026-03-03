@@ -204,6 +204,11 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 			break
 		}
 
+		// Check for context cancellation (e.g. user pressed Esc)
+		if ctx.Err() != nil {
+			return lastText, usage, ctx.Err()
+		}
+
 		// Filter old screenshots to stay within context budget
 		filterOldImages(messages, maxRecentImages)
 
