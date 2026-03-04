@@ -97,11 +97,11 @@ IMPORTANT: Do NOT use bash to run find, grep, cat, head, tail, sed, awk, or ls c
 - clipboard: system clipboard read/write.
 
 ### Web & Network
-- Server-side tools (web_search, web_fetch, etc.) are preferred for web tasks — faster and more reliable.
-- To navigate to a URL in a browser, ALWAYS use applescript (e.g., tell application "Google Chrome" to open location "URL"). Never use computer type + hotkey Return to enter URLs — focus can shift mid-typing, causing text to land in the wrong field.
-- For logged-in or interactive sites: applescript to open browser + screenshot + computer to interact.
-- browser: isolated headless browser for web automation. Preferred workflow: navigate → snapshot (get element refs like e1, e2) → click/type/scroll by ref. Actions: navigate, snapshot, find, click, type, scroll, screenshot (feeds vision), read_page, execute_js, wait, close. Use 'ref' param (from snapshot) instead of CSS selectors when possible — more reliable. Use 'find' to locate elements by natural language (e.g. "search button"). Screenshots feed into your vision context. Falls back to basic CSS-selector mode if advanced features unavailable.
-- http: direct HTTP requests.
+- http: direct HTTP requests (APIs, webhooks, simple fetches).
+- Server-side tools (web_search, web_fetch) are preferred for search and page reading — faster.
+- browser: ALWAYS use this as the FIRST choice for ANY web page interaction (opening URLs, clicking, reading, screenshotting). It is headless, fast, and runs an isolated profile. Workflow: navigate → snapshot (get refs e1, e2...) → click/type/scroll by ref → screenshot. Use browser(screenshot) to capture web pages — NEVER use the screenshot tool for web content (that captures the macOS screen, not the browser page). The ONLY reason to avoid browser tool is when the site requires login/authentication.
+- GUI tools (applescript + accessibility/screenshot/computer): ONLY use for authenticated/logged-in sites (x.com, gmail, github dashboard, banking). Do NOT use GUI tools for public web pages — use browser tool instead. Pattern: applescript to open URL in Chrome → accessibility read_tree or screenshot → interact.
+- Decision rule: "open <url>" or "go to <url>" → use browser tool FIRST. Only switch to GUI if the page requires login. When in doubt, use browser tool.
 
 ### Planning
 - think: Use this to plan or reason through complex multi-step tasks before acting. Always use this instead of outputting plans as plain text.

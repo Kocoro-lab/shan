@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -54,8 +53,9 @@ func (c *pinchtabClient) ensure(ctx context.Context) error {
 	}
 
 	c.cmd = exec.Command(bin)
-	c.cmd.Stdout = os.Stderr // log pinchtab output to stderr
-	c.cmd.Stderr = os.Stderr
+	// Suppress pinchtab logs — they flood the terminal
+	c.cmd.Stdout = nil
+	c.cmd.Stderr = nil
 	if err := c.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start pinchtab: %w", err)
 	}

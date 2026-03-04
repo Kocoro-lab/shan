@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -122,7 +121,7 @@ func (t *BrowserTool) Run(ctx context.Context, argsJSON string) (agent.ToolResul
 	case "scroll":
 		return t.scroll(ctx, args, timeout)
 	case "screenshot":
-		return t.screenshot(ctx, timeout)
+		return t.screenshot(ctx, args, timeout)
 	case "read_page":
 		return t.readPage(ctx, args, timeout)
 	case "execute_js":
@@ -252,12 +251,15 @@ func (t *BrowserTool) navigate(_ context.Context, args browserArgs, timeout time
 	if t.isPinchtab() {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		resp, err := t.pt.navigate(ctx, ptNavigateReq{URL: args.URL, TabID: t.tabID})
+		// Always open a new tab to isolate navigation from previous tasks
+		resp, err := t.pt.navigate(ctx, ptNavigateReq{URL: args.URL, NewTab: true})
 		if err != nil {
 			return agent.ToolResult{Content: fmt.Sprintf("navigate error: %v", err), IsError: true}, nil
 		}
-		t.tabID = resp.TabID
-		return agent.ToolResult{Content: fmt.Sprintf("Navigated to: %s\nTitle: %s\nTab: %s", resp.URL, resp.Title, resp.TabID)}, nil
+		if resp.TabID != "" {
+			t.tabID = resp.TabID
+		}
+		return agent.ToolResult{Content: fmt.Sprintf("Navigated to: %s\nTitle: %s", resp.URL, resp.Title)}, nil
 	}
 
 	// chromedp
@@ -381,16 +383,18 @@ func (t *BrowserTool) scroll(_ context.Context, args browserArgs, timeout time.D
 	return agent.ToolResult{Content: fmt.Sprintf("Scrolled to bottom (height: %d)", scrollHeight)}, nil
 }
 
-func (t *BrowserTool) screenshot(_ context.Context, timeout time.Duration) (agent.ToolResult, error) {
+func (t *BrowserTool) screenshot(_ context.Context, _ browserArgs, timeout time.Duration) (agent.ToolResult, error) {
 	if t.isPinchtab() {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
+		// Note: pinchtab v0.7.6 captures viewport only (no full-page support).
+		// For full-page, the LLM can scroll + take multiple screenshots.
 		data, err := t.pt.screenshot(ctx, t.tabID)
 		if err != nil {
 			return agent.ToolResult{Content: fmt.Sprintf("screenshot error: %v", err), IsError: true}, nil
 		}
 
-		// Save to temp file
+		// Save to temp file, resize for vision loop
 		f, err := os.CreateTemp("", "browser-screenshot-*.jpg")
 		if err != nil {
 			return agent.ToolResult{Content: fmt.Sprintf("failed to create temp file: %v", err), IsError: true}, nil
@@ -398,14 +402,16 @@ func (t *BrowserTool) screenshot(_ context.Context, timeout time.Duration) (agen
 		f.Write(data)
 		f.Close()
 
-		// Wire into vision loop
-		b64 := base64.StdEncoding.EncodeToString(data)
+		// Best-effort resize — skip if image is too small or sips fails
+		ResizeImage(f.Name(), DefaultAPIWidth)
+
+		block, err := EncodeImage(f.Name())
+		if err != nil {
+			return agent.ToolResult{Content: fmt.Sprintf("encode error: %v", err), IsError: true}, nil
+		}
 		return agent.ToolResult{
 			Content: fmt.Sprintf("Screenshot saved to: %s", f.Name()),
-			Images: []agent.ImageBlock{{
-				MediaType: "image/jpeg",
-				Data:      b64,
-			}},
+			Images:  []agent.ImageBlock{block},
 		}, nil
 	}
 
@@ -422,17 +428,19 @@ func (t *BrowserTool) screenshot(_ context.Context, timeout time.Duration) (agen
 	if err != nil {
 		return agent.ToolResult{Content: fmt.Sprintf("failed to create temp file: %v", err), IsError: true}, nil
 	}
-	defer f.Close()
 	f.Write(buf)
+	f.Close()
 
-	// Wire into vision loop for chromedp too
-	b64 := base64.StdEncoding.EncodeToString(buf)
+	// Best-effort resize
+	ResizeImage(f.Name(), DefaultAPIWidth)
+
+	block, err := EncodeImage(f.Name())
+	if err != nil {
+		return agent.ToolResult{Content: fmt.Sprintf("encode error: %v", err), IsError: true}, nil
+	}
 	return agent.ToolResult{
 		Content: fmt.Sprintf("Screenshot saved to: %s", f.Name()),
-		Images: []agent.ImageBlock{{
-			MediaType: "image/png",
-			Data:      b64,
-		}},
+		Images:  []agent.ImageBlock{block},
 	}, nil
 }
 
@@ -605,6 +613,13 @@ func (t *BrowserTool) findAction(_ context.Context, args browserArgs) (agent.Too
 	defer cancel()
 	resp, err := t.pt.find(ctx, ptFindReq{Query: args.Query, TabID: t.tabID, TopK: 5})
 	if err != nil {
+		// /find may not exist in older pinchtab versions — suggest snapshot instead
+		if strings.Contains(err.Error(), "404") {
+			return agent.ToolResult{
+				Content: "find is not available in this pinchtab version. Use 'snapshot' to get element refs, then click/type by ref.",
+				IsError: true,
+			}, nil
+		}
 		return agent.ToolResult{Content: fmt.Sprintf("find error: %v", err), IsError: true}, nil
 	}
 
