@@ -96,6 +96,7 @@ Do NOT use bash when a dedicated tool exists:
 
 ### Web & Network
 - Server-side tools (web_search, web_fetch, etc.) are preferred for web tasks — faster and more reliable.
+- To navigate to a URL in a browser, ALWAYS use applescript (e.g., tell application "Google Chrome" to open location "URL"). Never use computer type + hotkey Return to enter URLs — focus can shift mid-typing, causing text to land in the wrong field.
 - For logged-in or interactive sites: applescript to open browser + screenshot + computer to interact.
 - browser: isolated headless Chrome, no cookies/sessions. Only for own sites or simple fetches — public sites block with CAPTCHA.
 - http: direct HTTP requests.
