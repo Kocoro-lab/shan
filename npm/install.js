@@ -83,7 +83,7 @@ async function main() {
   const tmpTar = path.join(BIN_DIR, "_shan.tar.gz");
   fs.writeFileSync(tmpTar, tarball);
   try {
-    execFileSync("tar", ["-xzf", "_shan.tar.gz"], { cwd: BIN_DIR });
+    execFileSync("tar", ["-xzf", "_shan.tar.gz", "shan"], { cwd: BIN_DIR });
   } finally {
     fs.unlinkSync(tmpTar);
   }
