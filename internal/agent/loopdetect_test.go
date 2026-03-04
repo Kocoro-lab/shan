@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -497,5 +498,59 @@ func TestLoopDetector_RealWorldWebLoop_CrossTool(t *testing.T) {
 	action, _ = ld.Check("web_search")
 	if action != LoopForceStop {
 		t.Errorf("expected force stop after 7 same-topic web calls, got %v", action)
+	}
+}
+
+func TestLoopDetector_SuccessAfterError_NudgeOnPostRecoveryGUI(t *testing.T) {
+	ld := NewLoopDetector()
+
+	// Tool fails, then succeeds with different args, then agent goes to GUI → nudge
+	ld.Record("applescript", `{"script":"tell calendar \"Calendar\""}`, true, "calendar not found", "")
+	ld.Record("applescript", `{"script":"get name of every calendar"}`, false, "", "")
+	ld.Record("applescript", `{"script":"tell calendar \"日历\""}`, false, "", "")
+
+	// Now agent switches to GUI to verify — should nudge
+	ld.Record("screenshot", `{"target":"screen"}`, false, "", "")
+	action, msg := ld.Check("screenshot")
+	if action != LoopNudge {
+		t.Errorf("GUI after recovery should nudge, got %v", action)
+	}
+	if msg == "" {
+		t.Error("nudge should have a message")
+	}
+}
+
+func TestLoopDetector_SuccessAfterError_NoNudgeIfNoRecovery(t *testing.T) {
+	ld := NewLoopDetector()
+
+	// Tool fails, no retry yet, agent takes screenshot → no nudge from this detector
+	// (ToolModeSwitch won't fire either since last non-GUI was an error)
+	ld.Record("applescript", `{"script":"tell calendar \"Calendar\""}`, true, "not found", "")
+	ld.Record("screenshot", `{"target":"screen"}`, false, "", "")
+	action, _ := ld.Check("screenshot")
+	if action != LoopContinue {
+		t.Errorf("no recovery happened, should continue, got %v", action)
+	}
+}
+
+func TestLoopDetector_SuccessAfterError_ResetsOnNewWork(t *testing.T) {
+	ld := NewLoopDetector()
+
+	// Recovery happens, then agent moves on to genuinely different work
+	ld.Record("applescript", `{"script":"tell calendar \"Calendar\""}`, true, "not found", "")
+	ld.Record("applescript", `{"script":"tell calendar \"日历\""}`, false, "", "")
+
+	// Agent moves to a different non-GUI tool → recovery state resets
+	ld.Record("bash", `{"command":"echo done"}`, false, "", "")
+	ld.Record("file_read", `{"path":"notes.md"}`, false, "", "")
+
+	// GUI now should NOT nudge for recovery (agent moved on)
+	// Note: ToolModeSwitch may nudge since file_read succeeded — that's a different detector
+	// We specifically check that the nudge message does NOT mention recovery
+	ld.Record("screenshot", `{"target":"screen"}`, false, "", "")
+	action, msg := ld.Check("screenshot")
+	// It may nudge from ToolModeSwitch, but NOT from SuccessAfterError
+	if action == LoopNudge && strings.Contains(msg, "recovered") {
+		t.Errorf("recovery should have reset, but got recovery nudge: %s", msg)
 	}
 }
