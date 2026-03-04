@@ -46,12 +46,24 @@ type LoopDetector struct {
 	noProgressThreshold  int
 
 	repeatableTools map[string]bool
+
+	// ToolModeSwitch detector state
+	lastNonGUISuccess bool
+	lastNonGUITool    string
+	modeSwitchNudged  bool
 }
 
 // GUITools are tools that indicate GUI automation tasks.
 // Used by both LoopDetector (exempt from NoProgress) and effectiveMaxIter (higher limit).
 var GUITools = map[string]bool{
 	"screenshot": true, "computer": true, "applescript": true, "browser": true, "accessibility": true,
+}
+
+// visualTools are tools used purely for visual verification (screenshots, mouse/keyboard).
+// Separate from GUITools because applescript/browser return structured data results.
+// Used by the mode-switch detector to distinguish data tools from visual verification.
+var visualTools = map[string]bool{
+	"screenshot": true, "computer": true, "accessibility": true,
 }
 
 // NewLoopDetector creates a detector with production defaults.
@@ -88,6 +100,19 @@ func (ld *LoopDetector) Record(name, argsJSON string, isError bool, errMsg strin
 	if len(ld.history) > ld.historySize {
 		ld.history = ld.history[len(ld.history)-ld.historySize:]
 	}
+
+	// Track non-visual tool success for mode-switch detection.
+	// Uses visualTools (not GUITools) because applescript/browser return structured data.
+	if !visualTools[name] {
+		if isError {
+			ld.lastNonGUISuccess = false
+			ld.lastNonGUITool = ""
+		} else {
+			ld.lastNonGUISuccess = true
+			ld.lastNonGUITool = name
+			ld.modeSwitchNudged = false
+		}
+	}
 }
 
 // Check evaluates all five detectors for the named tool.
@@ -95,6 +120,13 @@ func (ld *LoopDetector) Record(name, argsJSON string, isError bool, errMsg strin
 func (ld *LoopDetector) Check(name string) (LoopAction, string) {
 	if len(ld.history) < 2 {
 		return LoopContinue, ""
+	}
+
+	// 0. Mode switch: visual tool used right after successful data tool
+	if visualTools[name] && ld.lastNonGUISuccess && !ld.modeSwitchNudged {
+		ld.modeSwitchNudged = true
+		return LoopNudge, fmt.Sprintf(
+			"Your previous non-GUI tool call (%s) returned a success result. Visual verification is likely unnecessary — consider whether you can summarize the result and stop.", ld.lastNonGUITool)
 	}
 
 	// Find latest argsHash for this tool (must be called right after Record).
