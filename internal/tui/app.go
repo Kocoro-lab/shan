@@ -54,7 +54,7 @@ type approvalRequestMsg struct {
 
 type healthCheckMsg struct {
 	gatewayOK  bool
-	newVersion string
+	updateMsg string
 }
 
 type serverToolsLoadedMsg struct {
@@ -179,8 +179,8 @@ func (m *Model) finishHeaderAnimation() tea.Cmd {
 		if m.serverToolErr != nil {
 			m.appendOutput(fmt.Sprintf("  %v", m.serverToolErr))
 		}
-		if m.headerHealth.newVersion != "" {
-			m.appendOutput(fmt.Sprintf("  Update available: v%s — run /update", m.headerHealth.newVersion))
+		if m.headerHealth.updateMsg != "" {
+			m.appendOutput(fmt.Sprintf("  %s", m.headerHealth.updateMsg))
 		}
 		m.appendOutput("")
 		m.headerHealth = nil
@@ -340,8 +340,9 @@ func (m *Model) checkHealth() tea.Cmd {
 		msg.gatewayOK = m.gateway.Health(ctx) == nil
 
 		if m.cfg.AutoUpdateCheck {
-			if release, found, _ := update.CheckForUpdate(m.version); found {
-				msg.newVersion = release.Version()
+			shannonDir := config.ShannonDir()
+			if shannonDir != "" {
+				msg.updateMsg = update.AutoUpdate(m.version, shannonDir)
 			}
 		}
 		return msg
@@ -603,8 +604,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.serverToolErr != nil {
 			m.appendOutput(fmt.Sprintf("  %v", m.serverToolErr))
 		}
-		if msg.newVersion != "" {
-			m.appendOutput(fmt.Sprintf("  Update available: v%s — run /update", msg.newVersion))
+		if msg.updateMsg != "" {
+			m.appendOutput(fmt.Sprintf("  %s", msg.updateMsg))
 		}
 		m.appendOutput("")
 		return m, nil

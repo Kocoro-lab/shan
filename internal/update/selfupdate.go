@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"runtime"
 
 	"github.com/Masterminds/semver/v3"
@@ -87,4 +88,53 @@ func DoUpdate(currentVersion string) (string, error) {
 
 func PlatformInfo() string {
 	return fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+// AutoUpdate performs a background-safe update check + download.
+// Returns a user-facing message (empty if nothing to report).
+// Skips if: dev build, cache is fresh, or installed via Homebrew.
+func AutoUpdate(currentVersion, shannonDir string) string {
+	if _, err := semver.NewVersion(currentVersion); err != nil {
+		return ""
+	}
+
+	cachePath := filepath.Join(shannonDir, "update-check.json")
+	cache := NewUpdateCache(cachePath)
+
+	if !cache.ShouldCheck() {
+		return ""
+	}
+
+	release, found, err := CheckForUpdate(currentVersion)
+	if err != nil || !found {
+		// Still record the check to avoid hammering API on errors
+		cache.Record(currentVersion)
+		return ""
+	}
+
+	cache.Record(release.Version())
+
+	// Homebrew detection — don't self-replace, just notify
+	exe, err := selfupdate.ExecutablePath()
+	if err != nil {
+		return fmt.Sprintf("Update available: v%s — run \"shan update\" or download from GitHub", release.Version())
+	}
+	if IsHomebrewPath(exe) {
+		return fmt.Sprintf("Update available: v%s — run \"brew upgrade shan\"", release.Version())
+	}
+
+	// Auto-download and replace
+	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	if err != nil {
+		return fmt.Sprintf("Update available: v%s — run \"shan update\"", release.Version())
+	}
+	updater, err := selfupdate.NewUpdater(selfupdate.Config{Source: source})
+	if err != nil {
+		return fmt.Sprintf("Update available: v%s — run \"shan update\"", release.Version())
+	}
+	if err := updater.UpdateTo(context.Background(), release, exe); err != nil {
+		return fmt.Sprintf("Update available: v%s (auto-update failed: %v)", release.Version(), err)
+	}
+
+	return fmt.Sprintf("Updated to v%s (restart to use)", release.Version())
 }

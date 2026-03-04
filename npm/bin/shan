@@ -1,0 +1,3 @@
+#\!/bin/sh
+echo "shan binary not installed. Run: npm rebuild shan-cli"
+exit 1

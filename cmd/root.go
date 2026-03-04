@@ -22,6 +22,7 @@ import (
 	mcppkg "github.com/Kocoro-lab/shan/internal/mcp"
 	"github.com/Kocoro-lab/shan/internal/tools"
 	"github.com/Kocoro-lab/shan/internal/tui"
+	"github.com/Kocoro-lab/shan/internal/update"
 )
 
 var Version = "dev"
@@ -96,6 +97,17 @@ func init() {
 }
 
 func runOneShot(cfg *config.Config, query string) error {
+	// Background auto-update (non-blocking)
+	if cfg.AutoUpdateCheck {
+		go func() {
+			if shanDir := config.ShannonDir(); shanDir != "" {
+				if msg := update.AutoUpdate(Version, shanDir); msg != "" {
+					fmt.Fprintf(os.Stderr, "  %s\n", msg)
+				}
+			}
+		}()
+	}
+
 	gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
 	reg, cleanup, serverErr := tools.RegisterAll(gw, cfg)
 	defer cleanup()

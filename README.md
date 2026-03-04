@@ -10,7 +10,13 @@ Interactive AI agent CLI powered by Shannon. Local tools for computer control, M
 brew install Kocoro-lab/tap/shan
 ```
 
-### Option B: Install Script
+### Option B: npm
+
+```bash
+npm install -g shan-cli
+```
+
+### Option C: Install Script
 
 Downloads the latest release binary to `/usr/local/bin`:
 
@@ -18,7 +24,7 @@ Downloads the latest release binary to `/usr/local/bin`:
 curl -fsSL https://raw.githubusercontent.com/Kocoro-lab/shan/main/install.sh | sh
 ```
 
-### Option C: Build from Source
+### Option D: Build from Source
 
 Requires **Go 1.25+**:
 
@@ -40,6 +46,16 @@ go install .
 
 ```bash
 shan --help
+```
+
+## Updating
+
+shan auto-updates when you launch it. You can also update explicitly:
+
+```bash
+shan update              # manual update
+brew upgrade shan        # if installed via Homebrew
+npm update -g shan-cli   # if installed via npm
 ```
 
 ## Setup
