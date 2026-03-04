@@ -252,6 +252,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		toolsUsed            = make(map[string]int)
 		totalToolCalls       int
 		lastText             string
+		truncatedText        strings.Builder // accumulates text from max_tokens continuations
 		afterCheckpoint      bool
 		checkpointDone       bool
 		nudgeCount           int
@@ -330,6 +331,21 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 				lastText = resp.OutputText
 			}
 
+			// If response was truncated by max_tokens, accumulate the partial text
+			// and continue the loop so the LLM can finish its output.
+			if isMaxTokensTruncation(resp.FinishReason) && resp.OutputText != "" {
+				truncatedText.WriteString(resp.OutputText)
+				messages = append(messages, client.Message{
+					Role:    "assistant",
+					Content: client.NewTextContent(resp.OutputText),
+				})
+				messages = append(messages, client.Message{
+					Role:    "user",
+					Content: client.NewTextContent("Your response was cut off. Continue from where you stopped."),
+				})
+				continue
+			}
+
 			if afterCheckpoint {
 				afterCheckpoint = false
 				messages = append(messages, client.Message{
@@ -373,10 +389,16 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 
 			// Only render text for the final response — intermediate text
 			// from checkpoint/hallucination paths must not leak to the user.
-			if a.handler != nil {
-				a.handler.OnText(resp.OutputText)
+			// If earlier iterations were truncated, prepend the accumulated text.
+			fullText := resp.OutputText
+			if truncatedText.Len() > 0 {
+				truncatedText.WriteString(resp.OutputText)
+				fullText = truncatedText.String()
 			}
-			return resp.OutputText, usage, nil
+			if a.handler != nil {
+				a.handler.OnText(fullText)
+			}
+			return fullText, usage, nil
 		}
 
 		// Reset hallucination counter when the model does use tools
@@ -1129,6 +1151,16 @@ var fabricatedToolCallPattern = regexp.MustCompile(`(?s)(?:I called \w+\(.*?\)\.
 // real tool execution produces results through the tool framework, not as text.
 func looksLikeFabricatedToolCalls(text string) bool {
 	return fabricatedToolCallPattern.MatchString(text)
+}
+
+// isMaxTokensTruncation returns true if the finish reason indicates the response
+// was cut short due to the output token limit. Different providers use different values.
+func isMaxTokensTruncation(reason string) bool {
+	switch reason {
+	case "max_tokens", "length", "end_turn_max_tokens":
+		return true
+	}
+	return false
 }
 
 // extractPathArg extracts the "path" field from a tool's JSON arguments.
