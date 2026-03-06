@@ -234,9 +234,7 @@ func New(cfg *config.Config, version string) *Model {
 	var mcpMgr *mcp.ClientManager
 	if len(cfg.MCPServers) > 0 {
 		mcpMgr = mcp.NewClientManager()
-		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		mcpTools, mcpErr := mcpMgr.ConnectAll(mcpCtx, cfg.MCPServers)
-		mcpCancel()
+		mcpTools, mcpErr := mcpMgr.ConnectAll(context.Background(), cfg.MCPServers)
 		if mcpErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: MCP servers: %v\n", mcpErr)
 		}
@@ -265,7 +263,11 @@ func New(cfg *config.Config, version string) *Model {
 		loop.SetSpecificModel(cfg.Agent.Model)
 	}
 	if cfg.Agent.Thinking {
-		loop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: cfg.Agent.ThinkingBudget})
+		if cfg.Agent.ThinkingMode == "enabled" {
+			loop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: cfg.Agent.ThinkingBudget})
+		} else {
+			loop.SetThinking(&client.ThinkingConfig{Type: "adaptive"})
+		}
 	}
 	if cfg.Agent.ReasoningEffort != "" {
 		loop.SetReasoningEffort(cfg.Agent.ReasoningEffort)
@@ -589,7 +591,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.agentLoop.SetSpecificModel(m.cfg.Agent.Model)
 			}
 			if m.cfg.Agent.Thinking {
-				m.agentLoop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: m.cfg.Agent.ThinkingBudget})
+				if m.cfg.Agent.ThinkingMode == "enabled" {
+					m.agentLoop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: m.cfg.Agent.ThinkingBudget})
+				} else {
+					m.agentLoop.SetThinking(&client.ThinkingConfig{Type: "adaptive"})
+				}
 			}
 			if m.cfg.Agent.ReasoningEffort != "" {
 				m.agentLoop.SetReasoningEffort(m.cfg.Agent.ReasoningEffort)
@@ -1567,7 +1573,10 @@ func formatConfigDisplay(cfg *config.Config) string {
 	sb.WriteString(fmt.Sprintf("  max_tokens: %d %s\n", cfg.Agent.MaxTokens, srcLabel("agent.max_tokens")))
 	sb.WriteString(fmt.Sprintf("  thinking: %v %s\n", cfg.Agent.Thinking, srcLabel("agent.thinking")))
 	if cfg.Agent.Thinking {
-		sb.WriteString(fmt.Sprintf("  thinking_budget: %d %s\n", cfg.Agent.ThinkingBudget, srcLabel("agent.thinking_budget")))
+		sb.WriteString(fmt.Sprintf("  thinking_mode: %s %s\n", cfg.Agent.ThinkingMode, srcLabel("agent.thinking_mode")))
+		if cfg.Agent.ThinkingMode == "enabled" {
+			sb.WriteString(fmt.Sprintf("  thinking_budget: %d %s\n", cfg.Agent.ThinkingBudget, srcLabel("agent.thinking_budget")))
+		}
 	}
 	if cfg.Agent.ReasoningEffort != "" {
 		sb.WriteString(fmt.Sprintf("  reasoning_effort: %s %s\n", cfg.Agent.ReasoningEffort, srcLabel("agent.reasoning_effort")))

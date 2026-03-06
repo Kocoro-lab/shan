@@ -85,20 +85,23 @@ func RegisterAll(gw *client.GatewayClient, cfg *config.Config) (*agent.ToolRegis
 	var mcpMgr *mcp.ClientManager
 	if cfg != nil && len(cfg.MCPServers) > 0 {
 		mcpMgr = mcp.NewClientManager()
-		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		mcpTools, mcpErr := mcpMgr.ConnectAll(mcpCtx, cfg.MCPServers)
-		mcpCancel()
+		mcpTools, mcpErr := mcpMgr.ConnectAll(context.Background(), cfg.MCPServers)
 		if mcpErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: MCP servers: %v\n", mcpErr)
 		}
+		registered := 0
+		servers := make(map[string]bool)
 		for _, t := range mcpTools {
 			if _, exists := reg.Get(t.Tool.Name); exists {
+				fmt.Fprintf(os.Stderr, "MCP: skipping %s/%s (local tool takes priority)\n", t.ServerName, t.Tool.Name)
 				continue // local tool takes priority
 			}
 			reg.Register(NewMCPTool(t.ServerName, t.Tool, mcpMgr))
+			servers[t.ServerName] = true
+			registered++
 		}
-		if len(mcpTools) > 0 {
-			fmt.Fprintf(os.Stderr, "MCP: %d tools from %d servers\n", len(mcpTools), len(cfg.MCPServers))
+		if registered > 0 {
+			fmt.Fprintf(os.Stderr, "MCP: %d tools from %d servers\n", registered, len(servers))
 		}
 	}
 

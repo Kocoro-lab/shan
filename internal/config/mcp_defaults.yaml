@@ -1,0 +1,160 @@
+# Default MCP Server Catalog for Shannon CLI
+#
+# All servers are disabled by default. To enable one, copy it into
+# ~/.shannon/config.yaml under mcp_servers: then:
+#   1. Set disabled: false
+#   2. Fill in required environment variables (API keys, tokens, etc.)
+#   3. Restart shan
+#
+# Servers are organized by category. Each server entry includes:
+#   command: The command to run (usually npx)
+#   args: Arguments to pass to the command
+#   env: Environment variables (API keys, tokens)
+#   disabled: Set to false to enable
+#   context: Instructions for the LLM on how to use this server's tools
+
+# ============================================================================
+# CORE CAPABILITIES
+# ============================================================================
+
+# Playwright - Browser automation using accessibility snapshots
+# No API keys required. Requires Node.js 18+.
+# Docs: https://github.com/microsoft/playwright-mcp
+playwright:
+  command: npx
+  args: ["-y", "@playwright/mcp"]
+  disabled: true
+  context: >-
+    Browser automation via Playwright. Use for web scraping, form filling,
+    navigation, and testing. Operates through accessibility snapshots,
+    not screenshots.
+
+# Fetch - Web content fetching optimized for LLM consumption
+# No API keys required. Requires Node.js 18+.
+# Docs: https://github.com/modelcontextprotocol/servers/tree/main/src/fetch
+fetch:
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-fetch"]
+  disabled: true
+  context: >-
+    Fetch web pages and convert to LLM-friendly format. Use for reading
+    documentation, articles, and web content.
+
+# Memory - Persistent knowledge graph for long-term memory
+# No API keys required. Requires Node.js 18+.
+# Docs: https://github.com/modelcontextprotocol/servers/tree/main/src/memory
+memory:
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-memory"]
+  disabled: true
+  context: >-
+    Persistent knowledge graph memory. Use to store and retrieve facts,
+    relationships, and context across sessions.
+
+# Sequential Thinking - Structured reasoning for complex problems
+# No API keys required. Requires Node.js 18+.
+# Docs: https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking
+sequential-thinking:
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+  disabled: true
+  context: >-
+    Structured step-by-step reasoning for complex problems. Use when
+    breaking down multi-step analysis or decision-making tasks.
+
+# ============================================================================
+# SOCIAL MEDIA
+# ============================================================================
+
+# X/Twitter - Post tweets, search, delete, and media uploads on X/Twitter
+# Requires: Twitter Developer account with API v2 access
+# Get keys at: https://developer.x.com/en/portal/dashboard
+# Supports both OAuth 1.0a and OAuth 2.0 authentication
+x-twitter:
+  command: npx
+  args: ["-y", "@mbelinky/x-mcp-server"]
+  env:
+    API_KEY: ""
+    API_SECRET_KEY: ""
+    ACCESS_TOKEN: ""
+    ACCESS_TOKEN_SECRET: ""
+  disabled: true
+  context: >-
+    Post tweets (with optional media), search X/Twitter, and delete tweets.
+    Always show the draft tweet to the user and get explicit approval before
+    posting. Rate limits apply on free tier (1500 posts/month).
+
+# ============================================================================
+# PRODUCTIVITY
+# ============================================================================
+
+# GitHub - Repository management, issues, PRs, and Actions
+# Requires: GitHub Personal Access Token
+# Get token at: https://github.com/settings/tokens
+# Install binary: https://github.com/github/github-mcp-server/releases
+github:
+  command: github-mcp-server
+  args: ["stdio"]
+  env:
+    GITHUB_PERSONAL_ACCESS_TOKEN: ""
+  disabled: true
+  context: >-
+    Manage GitHub repositories, issues, pull requests, and Actions.
+    Use for code review, issue triage, and repository management.
+
+# Notion - Pages, databases, and content management
+# Requires: Notion Integration Token
+# Create integration at: https://www.notion.so/my-integrations
+# Share pages/databases with your integration after creating it
+notion:
+  command: npx
+  args: ["-y", "@notionhq/notion-mcp-server"]
+  env:
+    NOTION_TOKEN: ""
+  disabled: true
+  context: >-
+    Read and write Notion pages, databases, and blocks. The integration
+    can only access pages explicitly shared with it.
+
+# Slack - Messages, channels, and workspace search
+# Requires: Slack Bot Token and Team ID
+# Create app at: https://api.slack.com/apps
+# Required scopes: channels:read, chat:write, search:messages
+slack:
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-slack"]
+  env:
+    SLACK_BOT_TOKEN: ""
+    SLACK_TEAM_ID: ""
+  disabled: true
+  context: >-
+    Send messages, read channels, and search Slack workspace.
+    Always confirm with the user before sending messages.
+
+# Google Workspace - Gmail, Calendar, Drive, Docs, Sheets
+# Requires: Google Cloud OAuth credentials
+# Setup: https://console.cloud.google.com/apis/credentials
+# Download credentials.json and place in ~/.shannon/
+google-workspace:
+  command: npx
+  args: ["-y", "@presto-ai/google-workspace-mcp"]
+  disabled: true
+  context: >-
+    Interact with Gmail, Google Calendar, Drive, Docs, and Sheets.
+    Always confirm before sending emails or creating calendar events.
+
+# ============================================================================
+# DATA
+# ============================================================================
+
+# PostgreSQL - Query and manage PostgreSQL databases
+# Requires: PostgreSQL connection string
+# Format: postgresql://user:password@host:port/database
+postgres:
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:password@localhost:5432/YOUR_DATABASE"]
+  disabled: true
+  context: >-
+    Query PostgreSQL databases. Use for data analysis and database
+    management. Replace the connection string in args with your actual
+    database URL.

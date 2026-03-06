@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
+	"time"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,12 +15,12 @@ import (
 // MCPServerConfig describes how to connect to an MCP server.
 type MCPServerConfig struct {
 	Command  string            `yaml:"command" mapstructure:"command"`
-	Args     []string          `yaml:"args" mapstructure:"args"`
-	Env      map[string]string `yaml:"env" mapstructure:"env"`
-	Type     string            `yaml:"type" mapstructure:"type"`         // "stdio" (default) or "http"
-	URL      string            `yaml:"url" mapstructure:"url"`           // for http type
-	Disabled bool              `yaml:"disabled" mapstructure:"disabled"` // skip this server
-	Context  string            `yaml:"context" mapstructure:"context"`   // LLM context injected into system prompt
+	Args     []string          `yaml:"args,omitempty" mapstructure:"args"`
+	Env      map[string]string `yaml:"env,omitempty" mapstructure:"env"`
+	Type     string            `yaml:"type,omitempty" mapstructure:"type"`         // "stdio" (default) or "http"
+	URL      string            `yaml:"url,omitempty" mapstructure:"url"`           // for http type
+	Disabled bool              `yaml:"disabled,omitempty" mapstructure:"disabled"` // skip this server
+	Context  string            `yaml:"context,omitempty" mapstructure:"context"`   // LLM context injected into system prompt
 }
 
 // RemoteTool represents a tool discovered from an MCP server.
@@ -50,7 +52,10 @@ func (m *ClientManager) ConnectAll(ctx context.Context, servers map[string]MCPSe
 			continue
 		}
 
-		tools, err := m.connect(ctx, name, cfg)
+		// Per-server timeout so slow servers don't starve others
+		serverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		tools, err := m.connect(serverCtx, name, cfg)
+		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 			continue
@@ -58,8 +63,13 @@ func (m *ClientManager) ConnectAll(ctx context.Context, servers map[string]MCPSe
 		allTools = append(allTools, tools...)
 	}
 
-	if len(errs) > 0 && len(allTools) == 0 {
-		return nil, fmt.Errorf("all MCP servers failed: %v", errs)
+	if len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "MCP: %s\n", e)
+		}
+		if len(allTools) == 0 {
+			return nil, fmt.Errorf("all MCP servers failed")
+		}
 	}
 
 	return allTools, nil

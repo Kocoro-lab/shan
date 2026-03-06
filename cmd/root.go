@@ -140,7 +140,11 @@ func runOneShot(cfg *config.Config, query string) error {
 		loop.SetSpecificModel(cfg.Agent.Model)
 	}
 	if cfg.Agent.Thinking {
-		loop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: cfg.Agent.ThinkingBudget})
+		if cfg.Agent.ThinkingMode == "enabled" {
+			loop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: cfg.Agent.ThinkingBudget})
+		} else {
+			loop.SetThinking(&client.ThinkingConfig{Type: "adaptive"})
+		}
 	}
 	if cfg.Agent.ReasoningEffort != "" {
 		loop.SetReasoningEffort(cfg.Agent.ReasoningEffort)

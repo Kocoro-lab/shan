@@ -241,8 +241,8 @@ type CompletionRequest struct {
 // ThinkingConfig for Anthropic extended thinking.
 // Sent as-is to the gateway which passes it to the Anthropic provider.
 type ThinkingConfig struct {
-	Type         string `json:"type"`                    // "enabled" or "disabled"
-	BudgetTokens int    `json:"budget_tokens,omitempty"` // thinking token budget
+	Type         string `json:"type"`                    // "adaptive", "enabled", or "disabled"
+	BudgetTokens int    `json:"budget_tokens,omitempty"` // thinking token budget (only for "enabled" mode)
 }
 
 type FunctionCall struct {
