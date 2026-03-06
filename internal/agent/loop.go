@@ -63,6 +63,7 @@ const baseSystemPrompt = `You are Shannon, an AI assistant running in a CLI term
 - Verification preference chain: tool return value (best) > targeted data query > GUI inspection (worst). Only escalate when the cheaper option is insufficient.
 - No mode switching for verification: if the task was accomplished through data tools, do not switch to GUI tools just to visually confirm. The tool result is the source of truth.
 - Parallel when independent: if you need multiple pieces of information that don't depend on each other, request them in parallel tool calls.
+- Never call the same tool twice with identical arguments in a single response. Duplicate calls waste tokens and may cause errors (e.g. duplicate posts, double deletions).
 - Stop at sufficiency: once the user's request is fulfilled and you have confirmation from the tool result, summarize and stop. Additional "just to be sure" actions waste time and tokens.
 
 ## Multi-Step Tasks
@@ -499,11 +500,29 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		execResults := make([]toolExecResult, len(toolCalls))
 		var approved []approvedToolCall
 
+		// Deduplicate identical tool calls (same name + same arguments).
+		// The first occurrence executes; duplicates get a synthetic error result.
+		seenCalls := make(map[string]bool, len(toolCalls))
+
 		for idx, fc := range toolCalls {
 			totalToolCalls++
 			toolsUsed[fc.Name]++
 			argsStr := fc.ArgumentsString()
 			callMeta[idx].argsStr = argsStr
+
+			dedupKey := fc.Name + "\x00" + argsStr
+			if seenCalls[dedupKey] {
+				callMeta[idx].resolved = true
+				execResults[idx] = toolExecResult{
+					result: ToolResult{Content: "duplicate tool call skipped (identical to earlier call in this response)", IsError: true},
+				}
+				if a.handler != nil {
+					a.handler.OnToolCall(fc.Name, argsStr)
+					a.handler.OnToolResult(fc.Name, argsStr, execResults[idx].result, 0)
+				}
+				continue
+			}
+			seenCalls[dedupKey] = true
 
 			if a.handler != nil {
 				a.handler.OnToolCall(fc.Name, argsStr)
