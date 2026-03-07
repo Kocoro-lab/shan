@@ -27,7 +27,7 @@ internal/
   agent/
     loop.go            # AgentLoop.Run() — core agentic loop, SetAgentOverride()
     tools.go           # Tool interface, ToolRegistry, Schemas()
-    loopdetect.go      # 7 stuck-loop detectors
+    loopdetect.go      # 9 stuck-loop detectors
     readtracker.go     # read-before-edit enforcement
     approval_cache.go  # per-turn approval caching
   agents/
