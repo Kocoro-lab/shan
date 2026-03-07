@@ -1701,3 +1701,148 @@ func TestAgentLoop_CompactionSummaryTransientFailureRecovers(t *testing.T) {
 		t.Errorf("expected 'Done with compaction.', got %q", result)
 	}
 }
+
+// cloudDelegateHandler tracks tool results for cloud_delegate lock tests.
+type cloudDelegateHandler struct {
+	mu      sync.Mutex
+	results []cloudDelegateResult
+}
+
+type cloudDelegateResult struct {
+	name    string
+	content string
+	isError bool
+}
+
+func (h *cloudDelegateHandler) OnToolCall(name string, args string) {}
+func (h *cloudDelegateHandler) OnToolResult(name string, args string, result ToolResult, elapsed time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.results = append(h.results, cloudDelegateResult{name: name, content: result.Content, isError: result.IsError})
+}
+func (h *cloudDelegateHandler) OnText(text string)                            {}
+func (h *cloudDelegateHandler) OnStreamDelta(delta string)                    {}
+func (h *cloudDelegateHandler) OnUsage(usage TurnUsage)                       {}
+func (h *cloudDelegateHandler) OnApprovalNeeded(tool string, args string) bool { return true }
+
+func TestAgentLoop_CloudDelegateLock(t *testing.T) {
+	// Mock cloud_delegate tool: named "cloud_delegate", no approval needed for test (bypass).
+	cloudTool := &mockApprovalTool{
+		name:     "cloud_delegate",
+		safeArgs: func(string) bool { return true },
+	}
+
+	t.Run("parallel_calls_same_response", func(t *testing.T) {
+		// Two cloud_delegate calls with different args in one response.
+		// First should execute, second should be blocked by the lock.
+		var callCount int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n := atomic.AddInt32(&callCount, 1)
+			if n == 1 {
+				json.NewEncoder(w).Encode(multiToolResponse("", []client.FunctionCall{
+					{ID: "cd1", Name: "cloud_delegate", Arguments: json.RawMessage(`{"task":"search A"}`)},
+					{ID: "cd2", Name: "cloud_delegate", Arguments: json.RawMessage(`{"task":"search B"}`)},
+				}, 10, 5))
+			} else {
+				json.NewEncoder(w).Encode(nativeResponse("summary", "end_turn", nil, 10, 5))
+			}
+		}))
+		defer server.Close()
+
+		gw := client.NewGatewayClient(server.URL, "")
+		reg := NewToolRegistry()
+		reg.Register(cloudTool)
+		handler := &cloudDelegateHandler{}
+		loop := NewAgentLoop(gw, reg, "medium", "", 25, 2000, 200, nil, nil, nil)
+		loop.SetHandler(handler)
+		loop.SetBypassPermissions(true)
+
+		result, _, err := loop.Run(context.Background(), "search both", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != "summary" {
+			t.Errorf("expected 'summary', got %q", result)
+		}
+
+		handler.mu.Lock()
+		defer handler.mu.Unlock()
+
+		// Expect exactly 2 cloud_delegate results: first success, second blocked.
+		cdResults := 0
+		var blockedFound bool
+		for _, r := range handler.results {
+			if r.name == "cloud_delegate" {
+				cdResults++
+				if r.isError && strings.Contains(r.content, "already called this turn") {
+					blockedFound = true
+				}
+			}
+		}
+		if cdResults != 2 {
+			t.Errorf("expected 2 cloud_delegate results, got %d", cdResults)
+		}
+		if !blockedFound {
+			t.Error("expected second cloud_delegate to be blocked, but no blocked result found")
+		}
+	})
+
+	t.Run("cross_iteration_blocked", func(t *testing.T) {
+		// First iteration: single cloud_delegate call (succeeds).
+		// Second iteration: LLM tries cloud_delegate again (should be blocked).
+		var callCount int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n := atomic.AddInt32(&callCount, 1)
+			switch n {
+			case 1:
+				// First: single cloud_delegate call
+				json.NewEncoder(w).Encode(nativeResponseWithID("", "tool_use",
+					toolCallWithID("cloud_delegate", `{"task":"research X"}`, "cd1"), 10, 5))
+			case 2:
+				// Second: LLM tries cloud_delegate again with different args
+				json.NewEncoder(w).Encode(nativeResponseWithID("", "tool_use",
+					toolCallWithID("cloud_delegate", `{"task":"research Y"}`, "cd2"), 10, 5))
+			default:
+				json.NewEncoder(w).Encode(nativeResponse("final", "end_turn", nil, 10, 5))
+			}
+		}))
+		defer server.Close()
+
+		gw := client.NewGatewayClient(server.URL, "")
+		reg := NewToolRegistry()
+		reg.Register(cloudTool)
+		handler := &cloudDelegateHandler{}
+		loop := NewAgentLoop(gw, reg, "medium", "", 25, 2000, 200, nil, nil, nil)
+		loop.SetHandler(handler)
+		loop.SetBypassPermissions(true)
+
+		result, _, err := loop.Run(context.Background(), "research", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != "final" {
+			t.Errorf("expected 'final', got %q", result)
+		}
+
+		handler.mu.Lock()
+		defer handler.mu.Unlock()
+
+		var firstOK, secondBlocked bool
+		for i, r := range handler.results {
+			if r.name == "cloud_delegate" {
+				if i == 0 && !r.isError {
+					firstOK = true
+				}
+				if r.isError && strings.Contains(r.content, "already called this turn") {
+					secondBlocked = true
+				}
+			}
+		}
+		if !firstOK {
+			t.Error("expected first cloud_delegate to succeed")
+		}
+		if !secondBlocked {
+			t.Error("expected second cloud_delegate (cross-iteration) to be blocked")
+		}
+	})
+}

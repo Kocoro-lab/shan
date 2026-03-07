@@ -358,7 +358,8 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		compactionSummary    string // cached summary from compaction
 		compactionApplied    bool   // true once messages have been shaped
 		summaryFailures      int    // consecutive summary failures; backs off after 3
-		cloudNudgeFired      bool
+		cloudNudgeFired     bool
+		cloudDelegateClaimed bool // set on first cloud_delegate attempt; blocks all subsequent calls
 	)
 
 	for i := 0; ; i++ {
@@ -634,6 +635,23 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 				continue
 			}
 			seenCalls[dedupKey] = true
+
+			// cloud_delegate: once-per-turn lock. The first call claims the lock;
+			// any subsequent call (same response or later iteration) is blocked.
+			if fc.Name == "cloud_delegate" {
+				if cloudDelegateClaimed {
+					callMeta[idx].resolved = true
+					execResults[idx] = toolExecResult{
+						result: ToolResult{Content: "cloud_delegate already called this turn. Use the previous result — do not re-delegate.", IsError: true},
+					}
+					if a.handler != nil {
+						a.handler.OnToolCall(fc.Name, argsStr)
+						a.handler.OnToolResult(fc.Name, argsStr, execResults[idx].result, 0)
+					}
+					continue
+				}
+				cloudDelegateClaimed = true
+			}
 
 			if a.handler != nil {
 				a.handler.OnToolCall(fc.Name, argsStr)
