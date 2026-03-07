@@ -324,6 +324,7 @@ Tool call from LLM
 - **CWD auto-approve**: Read-only tools (`file_read`, `glob`, `grep`, `directory_list`) auto-approve paths under the current working directory
 - **Auto-approve**: Safe bash commands (`ls`, `git status`, `go test`, `make`, etc.), `process list/ports`, localhost HTTP
 - **Prompt**: Destructive tools show `[y/n]` in TUI or one-shot mode
+- **Denied-call blocking**: If you deny a tool call, the same tool+args won't be re-prompted for the rest of the turn
 - **`-y` flag**: Auto-approves everything in one-shot mode
 - **No handler**: Denied by default (security fail-safe)
 
@@ -916,7 +917,7 @@ go vet ./...                 # lint
 - **Vision**: Screenshots are captured, resized (1200px max), and sent as base64 image content blocks to the LLM. The computer tool uses Anthropic's native `computer_20251124` schema with coordinate scaling for retina displays. Vision models may blend what they see with training knowledge — verify critical details.
 - **Streaming**: One-shot mode does not stream responses; it waits for the full LLM response before displaying.
 - **Windows/Linux**: Local tools (clipboard, notifications, AppleScript, screenshot, computer) and scheduled tasks (launchd) are macOS-only.
-- **Daemon**: Requires Shannon Cloud WebSocket endpoint (`wss://.../v1/ws/messages`) — not yet available. Session history is in-memory only (lost on daemon restart).
+- **Daemon**: Requires Shannon Cloud WebSocket endpoint (`wss://.../v1/ws/messages`) — not yet available.
 - **Scheduled tasks**: launchd-only (macOS). Complex cron expressions (ranges, steps) fall back to `StartInterval` instead of `StartCalendarInterval`.
 
 ## License
