@@ -139,3 +139,15 @@ func RegisterAll(gw *client.GatewayClient, cfg *config.Config) (*agent.ToolRegis
 
 	return reg, cleanup, nil
 }
+
+// RegisterCloudDelegate registers the cloud_delegate tool if cloud is enabled.
+func RegisterCloudDelegate(reg *agent.ToolRegistry, gw *client.GatewayClient, cfg *config.Config, handler agent.EventHandler, agentName, agentPrompt string) {
+	if cfg == nil || !cfg.Cloud.Enabled {
+		return
+	}
+	timeout := time.Duration(cfg.Cloud.Timeout) * time.Second
+	if timeout <= 0 {
+		timeout = 3600 * time.Second
+	}
+	reg.Register(NewCloudDelegateTool(gw, cfg.APIKey, timeout, handler, agentName, agentPrompt))
+}

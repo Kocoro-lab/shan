@@ -343,6 +343,8 @@ func (m *Model) loadServerTools() tea.Cmd {
 		defer cancel()
 
 		err := tools.RegisterServerTools(ctx, m.gateway, reg)
+		// Cloud delegation tool (uses same gateway, agent forwarding not needed — loop already has override)
+		tools.RegisterCloudDelegate(reg, m.gateway, m.cfg, nil, "", "")
 		return serverToolsLoadedMsg{
 			registry: reg,
 			err:      err,
@@ -792,6 +794,12 @@ func (m *Model) runAgentLoop(query string, history []client.Message) tea.Cmd {
 	return func() tea.Msg {
 		handler := &tuiEventHandler{model: m}
 		m.agentLoop.SetHandler(handler)
+		// Wire handler to cloud_delegate tool so it can stream events
+		if ct, ok := m.toolRegistry.Get("cloud_delegate"); ok {
+			if cdt, ok := ct.(*tools.CloudDelegateTool); ok {
+				cdt.SetHandler(handler)
+			}
+		}
 
 		result, usage, err := m.agentLoop.Run(ctx, query, history)
 		if result != "" && (err == nil || errors.Is(err, agent.ErrMaxIterReached)) {
@@ -1292,7 +1300,8 @@ Commands:
 
 // tuiEventHandler bridges agent events to the TUI
 type tuiEventHandler struct {
-	model *Model
+	model          *Model
+	cloudStreaming bool // when true, OnStreamDelta forwards to TUI (for cloud_delegate)
 }
 
 func (h *tuiEventHandler) OnToolCall(name string, args string) {
@@ -1352,8 +1361,16 @@ func (h *tuiEventHandler) OnText(text string) {
 }
 
 func (h *tuiEventHandler) OnStreamDelta(delta string) {
-	// No-op: suppress streaming text during agent loop iterations.
-	// View() shows the thinking indicator instead. OnText renders the final response.
+	// Suppressed for local LLM streaming (View shows thinking indicator, OnText renders final).
+	// cloud_delegate sets cloudStreaming=true so its events render in real time.
+	if h.cloudStreaming && delta != "" {
+		h.model.sendOutput(delta)
+	}
+}
+
+// SetCloudStreaming enables/disables delta forwarding for cloud_delegate events.
+func (h *tuiEventHandler) SetCloudStreaming(enabled bool) {
+	h.cloudStreaming = enabled
 }
 
 func (h *tuiEventHandler) OnUsage(usage agent.TurnUsage) {}

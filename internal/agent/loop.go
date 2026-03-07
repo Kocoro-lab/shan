@@ -112,6 +112,31 @@ IMPORTANT: Do NOT use bash to run find, grep, cat, head, tail, sed, awk, or ls c
 - system_info: OS/hardware information.
 - process: list/manage running processes.`
 
+const cloudDelegationGuidance = `
+
+## Cloud Delegation
+
+You have access to cloud_delegate for tasks that exceed local capability.
+
+ALWAYS LOCAL (never delegate):
+- File read/write/edit on user's machine
+- Shell commands, builds, tests, git operations
+- GUI automation (accessibility, applescript, screenshot, computer)
+- Clipboard, notifications, process management
+- Anything requiring the user's local filesystem or macOS environment
+
+ALWAYS CLOUD (delegate):
+- Multi-source research ("compare X", "find all Y across Z")
+- Parallel independent subtasks (3+ that don't share state)
+- Web scraping / data collection at scale
+- Long analysis requiring multiple LLM reasoning steps
+
+PREFER LOCAL (delegate only if struggling):
+- Single web search -> local http tool first
+- Simple Q&A with one source -> local first
+
+CRITICAL: Call cloud_delegate ONCE per task. When it returns a result, summarize it and STOP. Never re-call cloud_delegate with the same or similar task — the cloud already ran multiple agents and returned the best result. Treat its output as final.`
+
 type TurnUsage struct {
 	InputTokens         int
 	OutputTokens        int
@@ -285,6 +310,11 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		CWD:          cwd,
 	})
 
+	// Append cloud delegation guidance if tool is registered
+	if _, hasCloud := a.tools.Get("cloud_delegate"); hasCloud {
+		systemPrompt += cloudDelegationGuidance
+	}
+
 	messages := make([]client.Message, 0)
 	messages = append(messages, client.Message{Role: "system", Content: client.NewTextContent(systemPrompt)})
 	if history != nil {
@@ -328,6 +358,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		compactionSummary    string // cached summary from compaction
 		compactionApplied    bool   // true once messages have been shaped
 		summaryFailures      int    // consecutive summary failures; backs off after 3
+		cloudNudgeFired      bool
 	)
 
 	for i := 0; ; i++ {
@@ -855,6 +886,17 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 				Role:    "user",
 				Content: client.NewTextContent(worstMsg),
 			})
+		}
+
+		// One-shot cloud delegation nudge when struggling with web tasks
+		if !cloudNudgeFired && worstAction >= LoopNudge {
+			if _, hasCloud := a.tools.Get("cloud_delegate"); hasCloud && toolsUsed["http"] > 0 {
+				cloudNudgeFired = true
+				messages = append(messages, client.Message{
+					Role:    "user",
+					Content: client.NewTextContent("You seem to be struggling with web/research tasks. Consider using cloud_delegate to handle this on Shannon Cloud."),
+				})
+			}
 		}
 	}
 

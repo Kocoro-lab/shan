@@ -47,6 +47,8 @@ var daemonStartCmd = &cobra.Command{
 			log.Printf("Warning: %v", serverErr)
 		}
 
+		tools.RegisterCloudDelegate(reg, gw, cfg, nil, "", "") // daemon: agent forwarding per-message not yet supported
+
 		var auditor *audit.AuditLogger
 		if shanDir != "" {
 			auditor, _ = audit.NewAuditLogger(filepath.Join(shanDir, "logs"))
@@ -125,7 +127,14 @@ var daemonStartCmd = &cobra.Command{
 			if mcpCtx := mcppkg.BuildContext(cfg.MCPServers); mcpCtx != "" {
 				loop.SetMCPContext(mcpCtx)
 			}
-			loop.SetHandler(&daemonEventHandler{})
+			dh := &daemonEventHandler{}
+			loop.SetHandler(dh)
+			// Wire handler to cloud_delegate tool so it can stream events
+			if ct, ok := reg.Get("cloud_delegate"); ok {
+				if cdt, ok := ct.(*tools.CloudDelegateTool); ok {
+					cdt.SetHandler(dh)
+				}
+			}
 
 			result, usage, runErr := loop.Run(ctx, prompt, history)
 			if runErr != nil {

@@ -31,6 +31,7 @@ type Config struct {
 	Permissions     permissions.PermissionsConfig `mapstructure:"permissions" yaml:"permissions"`
 	Agent           AgentConfig                  `mapstructure:"agent" yaml:"agent"`
 	Tools           ToolsConfig                  `mapstructure:"tools" yaml:"tools"`
+	Cloud           CloudConfig                  `mapstructure:"cloud" yaml:"cloud"`
 	Hooks           hooks.HookConfig                `mapstructure:"hooks" yaml:"hooks"`
 	MCPServers      map[string]mcp.MCPServerConfig  `mapstructure:"mcp_servers" yaml:"mcp_servers"`
 	Sources         map[string]ConfigSource         `mapstructure:"-" yaml:"-"`
@@ -55,6 +56,11 @@ type ToolsConfig struct {
 	ArgsTruncation    int `mapstructure:"args_truncation" yaml:"args_truncation"`
 	ServerToolTimeout int `mapstructure:"server_tool_timeout" yaml:"server_tool_timeout"`
 	GrepMaxResults    int `mapstructure:"grep_max_results" yaml:"grep_max_results"`
+}
+
+type CloudConfig struct {
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+	Timeout int  `mapstructure:"timeout" yaml:"timeout"` // seconds
 }
 
 func ShannonDir() string {
@@ -103,6 +109,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("tools.args_truncation", 200)
 	viper.SetDefault("tools.server_tool_timeout", 5)
 	viper.SetDefault("tools.grep_max_results", 100)
+	viper.SetDefault("cloud.enabled", true)
+	viper.SetDefault("cloud.timeout", 3600)
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {

@@ -130,6 +130,13 @@ func runOneShot(cfg *config.Config, query string, agentOverride *agents.Agent) e
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", serverErr)
 	}
 
+	// Cloud delegation tool (uses same gateway client)
+	var cloudAgentPrompt string
+	if agentOverride != nil {
+		cloudAgentPrompt = agentOverride.Prompt
+	}
+	tools.RegisterCloudDelegate(reg, gw, cfg, nil, agentName, cloudAgentPrompt) // handler set later via loop.SetHandler
+
 	shannonDir := config.ShannonDir()
 
 	// Create audit logger (best-effort)

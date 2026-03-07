@@ -519,6 +519,29 @@ func (c *GatewayClient) SubmitTaskStream(ctx context.Context, req TaskRequest) (
 	return &result, nil
 }
 
+// ApproveReviewPlan approves a HITL research plan so the workflow continues.
+func (c *GatewayClient) ApproveReviewPlan(ctx context.Context, workflowID string) error {
+	body, _ := json.Marshal(map[string]string{"action": "approve"})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/tasks/%s/review", c.baseURL, url.PathEscape(workflowID)), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("approve request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("approve returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *GatewayClient) StreamURL(workflowID string) string {
 	return fmt.Sprintf("%s/api/v1/stream/sse?workflow_id=%s", c.baseURL, workflowID)
 }
