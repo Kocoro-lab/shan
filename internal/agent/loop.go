@@ -360,7 +360,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		compactionApplied    bool   // true once messages have been shaped
 		summaryFailures      int    // consecutive summary failures; backs off after 3
 		cloudNudgeFired     bool
-		cloudDelegateClaimed bool // set on first cloud_delegate attempt; blocks all subsequent calls
+		cloudDelegateClaimed bool // set on first cloud_delegate attempt; blocks subsequent calls unless it fails
 
 		// Cross-iteration dedup: cache successful results from previous iteration
 		// to prevent re-execution of identical tool calls across consecutive iterations.
@@ -572,7 +572,12 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 			return fullText, usage, nil
 		}
 
-		// Model made tool calls
+		// Model made tool calls — partial recovery for hallucination counter.
+		// Don't fully reset (allows alternating hallucinate→tools to accumulate),
+		// but forgive one nudge per real tool use to avoid permanent disabling.
+		if hallucinationNudges > 0 {
+			hallucinationNudges--
+		}
 		afterCheckpoint = false
 
 		// Execute all tool calls
@@ -675,6 +680,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 
 			// cloud_delegate: once-per-turn lock. The first call claims the lock;
 			// any subsequent call (same response or later iteration) is blocked.
+			// The lock resets if the call fails, allowing retry.
 			if fc.Name == "cloud_delegate" {
 				if cloudDelegateClaimed {
 					callMeta[idx].resolved = true
@@ -956,6 +962,7 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 
 		// Accumulate cross-iteration result cache from this iteration's successful executions.
 		// Sanitize before caching to avoid re-injecting raw base64 blobs into context.
+		// Invalidate stale file_read entries when file_edit/file_write modifies a path.
 		for _, ac := range approved {
 			r := execResults[ac.index].result
 			if !r.IsError {
@@ -965,6 +972,14 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 					cached.Content = sanitizeResult(cached.Content)
 				}
 				prevIterResults[key] = cached
+
+				// Evict file_read cache when the same path is written/edited
+				if ac.fc.Name == "file_write" || ac.fc.Name == "file_edit" {
+					if p := extractPathArg(callMeta[ac.index].argsStr); p != "" {
+						readKey := "file_read" + "\x00" + normalizeJSON(json.RawMessage(`{"path":"`+p+`"}`))
+						delete(prevIterResults, readKey)
+					}
+				}
 			}
 		}
 

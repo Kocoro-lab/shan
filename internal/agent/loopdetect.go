@@ -30,15 +30,18 @@ type ToolCallRecord struct {
 
 // LoopDetector uses a sliding window of recent tool calls to detect stuck loops.
 //
-// Six detectors (checked in order, first match wins):
+// Nine detection paths (checked in order, first match wins):
+//   - ToolModeSwitch: visual tool after successful GUI-adjacent tool (applescript/browser)
+//   - SuccessAfterError: visual tool after error recovery
 //   - ConsecutiveDuplicate: back-to-back identical calls (catches web_search→web_search)
 //   - ExactDuplicate: same name+argsHash spread across window (catches read→edit→read→edit→read)
 //   - SameToolError: same tool returns errors N+ times in window
-//   - FamilyNoProgress: web tools in the same family, counted by topic similarity
-//     (3 same-topic → nudge, 5 → stronger nudge, 7 → force stop; 7 family calls → force stop)
+//   - FamilyNoProgress: tools in the same family, counted by topic similarity
+//     (3 same-topic → nudge, 5 → stronger nudge, 7 → force stop)
+//     Fallback: same-tool count when topic tracking unavailable (5 → nudge, 7 → force stop)
 //   - SearchEscalation: consecutive search-family calls without intervening non-search tools
 //     (3 consecutive → nudge, 5 consecutive → force stop)
-//   - NoProgress: same tool called M+ times regardless of args (non-GUI only)
+//   - NoProgress: same tool called M+ times regardless of args (skip visual tools)
 //   - Sleep: bash commands containing sleep (2 → nudge, 4 → force stop)
 //
 // Response escalation: threshold = nudge, threshold+1 = force stop (consecutive), 2x threshold = force stop (others).
@@ -146,7 +149,7 @@ func (ld *LoopDetector) Record(name, argsJSON string, isError bool, errMsg strin
 	}
 }
 
-// Check evaluates all six detectors for the named tool.
+// Check evaluates all detectors for the named tool.
 // Returns the most severe action and an appropriate message.
 func (ld *LoopDetector) Check(name string) (LoopAction, string) {
 	if len(ld.history) < 2 {
