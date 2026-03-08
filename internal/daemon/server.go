@@ -23,10 +23,11 @@ type Server struct {
 	deps     *ServerDeps
 	server   *http.Server
 	listener net.Listener
+	version  string
 }
 
-func NewServer(port int, client *Client, deps *ServerDeps) *Server {
-	return &Server{port: port, client: client, deps: deps}
+func NewServer(port int, client *Client, deps *ServerDeps, version string) *Server {
+	return &Server{port: port, client: client, deps: deps, version: version}
 }
 
 func (s *Server) Port() int {
@@ -66,7 +67,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": s.version})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +76,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"is_connected": s.client.IsConnected(),
 		"active_agent": s.client.ActiveAgent(),
 		"uptime":       int(s.client.Uptime().Seconds()),
+		"version":      s.version,
 	})
 }
 

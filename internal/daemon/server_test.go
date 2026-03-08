@@ -15,7 +15,7 @@ import (
 
 func TestServer_Health(t *testing.T) {
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, nil)
+	srv := NewServer(0, c, nil, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -36,11 +36,14 @@ func TestServer_Health(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Errorf("body = %v", body)
 	}
+	if body["version"] != "test" {
+		t.Errorf("version = %q, want %q", body["version"], "test")
+	}
 }
 
 func TestServer_Status(t *testing.T) {
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, nil)
+	srv := NewServer(0, c, nil, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -57,6 +60,7 @@ func TestServer_Status(t *testing.T) {
 		IsConnected bool   `json:"is_connected"`
 		ActiveAgent string `json:"active_agent"`
 		Uptime      int    `json:"uptime"`
+		Version     string `json:"version"`
 	}
 	json.NewDecoder(resp.Body).Decode(&body)
 	if body.IsConnected {
@@ -65,11 +69,14 @@ func TestServer_Status(t *testing.T) {
 	if body.Uptime < 0 {
 		t.Error("uptime should be non-negative")
 	}
+	if body.Version != "test" {
+		t.Errorf("version = %q, want %q", body.Version, "test")
+	}
 }
 
 func TestServer_Shutdown(t *testing.T) {
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, nil)
+	srv := NewServer(0, c, nil, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go srv.Start(ctx)
@@ -92,7 +99,7 @@ func TestServer_Agents_Empty(t *testing.T) {
 		SessionCache: NewSessionCache(sessDir),
 	}
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, deps)
+	srv := NewServer(0, c, deps, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -122,7 +129,7 @@ func TestServer_Sessions_Empty(t *testing.T) {
 		SessionCache: NewSessionCache(sessDir),
 	}
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, deps)
+	srv := NewServer(0, c, deps, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -149,7 +156,7 @@ func TestServer_Sessions_Empty(t *testing.T) {
 func TestServer_Message_MissingText(t *testing.T) {
 	deps := &ServerDeps{}
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, deps)
+	srv := NewServer(0, c, deps, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -179,7 +186,7 @@ func TestServer_Message_AgentNotFound(t *testing.T) {
 		SessionCache: NewSessionCache(sessDir),
 	}
 	c := NewClient("ws://localhost:1/x", "", func(msg MessagePayload) string { return "" }, nil)
-	srv := NewServer(0, c, deps)
+	srv := NewServer(0, c, deps, "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

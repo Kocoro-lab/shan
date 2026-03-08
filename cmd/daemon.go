@@ -112,7 +112,7 @@ var daemonStartCmd = &cobra.Command{
 			log.Printf("daemon: [system] %s", text)
 		})
 
-		localServer := daemon.NewServer(7533, wsClient, deps)
+		localServer := daemon.NewServer(7533, wsClient, deps, Version)
 		serverErrCh := make(chan error, 1)
 		go func() {
 			serverErrCh <- localServer.Start(ctx)
