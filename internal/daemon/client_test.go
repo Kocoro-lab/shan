@@ -196,6 +196,51 @@ func TestClient_ClaimHandshake_Denied(t *testing.T) {
 	}
 }
 
+func TestClient_GracefulDisconnect(t *testing.T) {
+	msgs := make(chan DaemonMessage, 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
+		conn, _ := upgrader.Upgrade(w, r, nil)
+		defer conn.Close()
+		for {
+			var dm DaemonMessage
+			if err := conn.ReadJSON(&dm); err != nil {
+				return
+			}
+			msgs <- dm
+		}
+	}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	c := NewClient(wsURL, "", func(msg MessagePayload) string { return "" }, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := c.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go c.Listen(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	cancel()
+	time.Sleep(200 * time.Millisecond)
+
+	// Check if disconnect was the last message
+	var lastMsg DaemonMessage
+	for {
+		select {
+		case m := <-msgs:
+			lastMsg = m
+		default:
+			goto done
+		}
+	}
+done:
+	if lastMsg.Type != MsgTypeDisconnect {
+		t.Errorf("expected disconnect message, got type=%q", lastMsg.Type)
+	}
+}
+
 func TestClient_SystemMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{}
