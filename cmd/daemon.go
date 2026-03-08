@@ -75,9 +75,15 @@ var daemonStartCmd = &cobra.Command{
 			cancel()
 		}()
 
-		var wsClient *daemon.Client
-		wsClient = daemon.NewClient(wsEndpoint, cfg.APIKey, func(msg daemon.IncomingMessage) {
-			agentName, prompt := agents.ParseAgentMention(msg.Text)
+		wsClient := daemon.NewClient(wsEndpoint, cfg.APIKey, func(msg daemon.MessagePayload) string {
+			agentName := msg.AgentName
+			prompt := msg.Text
+			if agentName == "" {
+				agentName, prompt = agents.ParseAgentMention(msg.Text)
+			}
+			if prompt == "" {
+				prompt = msg.Text
+			}
 
 			var agentOverride *agents.Agent
 			if agentName != "" {
@@ -89,9 +95,6 @@ var daemonStartCmd = &cobra.Command{
 				} else {
 					agentOverride = a
 				}
-			}
-			if prompt == "" {
-				prompt = msg.Text
 			}
 
 			// Per-agent lock serializes concurrent messages to the same agent
@@ -139,13 +142,7 @@ var daemonStartCmd = &cobra.Command{
 			result, usage, runErr := loop.Run(ctx, prompt, history)
 			if runErr != nil {
 				log.Printf("daemon: agent error for %s: %v", agentName, runErr)
-				// Send error reply so the channel sender knows it failed
-				wsClient.SendReply(daemon.OutgoingReply{
-					Channel:  msg.Channel,
-					ThreadID: msg.ThreadID,
-					Text:     fmt.Sprintf("Sorry, I encountered an error: %v", runErr),
-				})
-				return
+				return fmt.Sprintf("Sorry, I encountered an error: %v", runErr)
 			}
 
 			sess.Messages = append(sess.Messages,
@@ -157,15 +154,18 @@ var daemonStartCmd = &cobra.Command{
 			}
 
 			log.Printf("daemon: reply to %s (%d tokens, $%.4f)", agentName, usage.TotalTokens, usage.CostUSD)
-
-			if err := wsClient.SendReply(daemon.OutgoingReply{
-				Channel:  msg.Channel,
-				ThreadID: msg.ThreadID,
-				Text:     result,
-			}); err != nil {
-				log.Printf("daemon: failed to send reply: %v", err)
-			}
+			return result
+		}, func(text string) {
+			log.Printf("daemon: [system] %s", text)
 		})
+
+		localServer := daemon.NewServer(7533, wsClient)
+		go func() {
+			if err := localServer.Start(ctx); err != nil {
+				log.Printf("daemon: local server error: %v", err)
+			}
+		}()
+		log.Printf("daemon: local server listening on http://127.0.0.1:7533")
 
 		log.Printf("daemon: connecting to %s", wsEndpoint)
 		wsClient.RunWithReconnect(ctx)
