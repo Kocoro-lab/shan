@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -136,7 +138,16 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the background daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Use Ctrl+C to stop foreground daemon. Background mode (-d) not yet implemented.")
+		resp, err := http.Post("http://127.0.0.1:7533/shutdown", "application/json", nil)
+		if err != nil {
+			return fmt.Errorf("daemon not running or not reachable: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			fmt.Println("Daemon stopped.")
+		} else {
+			return fmt.Errorf("unexpected response: %s", resp.Status)
+		}
 		return nil
 	},
 }
@@ -145,7 +156,33 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Not yet implemented.")
+		resp, err := http.Get("http://127.0.0.1:7533/status")
+		if err != nil {
+			fmt.Println("Daemon is not running.")
+			return nil
+		}
+		defer resp.Body.Close()
+
+		var status struct {
+			IsConnected bool   `json:"is_connected"`
+			ActiveAgent string `json:"active_agent"`
+			Uptime      int    `json:"uptime"`
+			Version     string `json:"version"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			return fmt.Errorf("failed to parse status: %w", err)
+		}
+
+		fmt.Printf("Status:    running\n")
+		if status.Version != "" {
+			fmt.Printf("Version:   %s\n", status.Version)
+		}
+		fmt.Printf("Connected: %v\n", status.IsConnected)
+		if status.ActiveAgent != "" {
+			fmt.Printf("Agent:     %s\n", status.ActiveAgent)
+		}
+		uptime := time.Duration(status.Uptime) * time.Second
+		fmt.Printf("Uptime:    %s\n", uptime)
 		return nil
 	},
 }
