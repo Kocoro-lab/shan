@@ -1,0 +1,169 @@
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strings"
+
+	"github.com/Kocoro-lab/shan/internal/agent"
+	"github.com/Kocoro-lab/shan/internal/agents"
+	"github.com/Kocoro-lab/shan/internal/audit"
+	"github.com/Kocoro-lab/shan/internal/client"
+	"github.com/Kocoro-lab/shan/internal/config"
+	"github.com/Kocoro-lab/shan/internal/hooks"
+	mcppkg "github.com/Kocoro-lab/shan/internal/mcp"
+	"github.com/Kocoro-lab/shan/internal/tools"
+)
+
+// RunAgentRequest is the input for RunAgent.
+type RunAgentRequest struct {
+	Text      string `json:"text"`
+	Agent     string `json:"agent,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// Validate checks that the request has the minimum required fields.
+func (r *RunAgentRequest) Validate() error {
+	if strings.TrimSpace(r.Text) == "" {
+		return fmt.Errorf("text is required")
+	}
+	return nil
+}
+
+// RunAgentResult is the output from RunAgent.
+type RunAgentResult struct {
+	Reply     string        `json:"reply"`
+	SessionID string        `json:"session_id"`
+	Agent     string        `json:"agent"`
+	Usage     RunAgentUsage `json:"usage"`
+}
+
+// RunAgentUsage tracks token and cost information for a single agent run.
+type RunAgentUsage struct {
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	TotalTokens  int     `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+// ServerDeps holds shared dependencies required by both the WS callback
+// and the HTTP server for running agent loops.
+type ServerDeps struct {
+	Config       *config.Config
+	GW           *client.GatewayClient
+	Registry     *agent.ToolRegistry
+	ShannonDir   string
+	AgentsDir    string
+	Auditor      *audit.AuditLogger
+	HookRunner   *hooks.HookRunner
+	SessionCache *SessionCache
+}
+
+// DaemonDeniedTools are tools that should not be auto-approved in daemon mode.
+// Schedule mutation tools can create persistent system-level side effects.
+var DaemonDeniedTools = map[string]bool{
+	"schedule_create": true,
+	"schedule_update": true,
+	"schedule_remove": true,
+}
+
+// RunAgent executes a single agent turn using the shared dependencies.
+// The caller provides an EventHandler to control streaming, approval, and
+// event reporting (WS uses daemonEventHandler, HTTP uses httpEventHandler).
+func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handler agent.EventHandler) (*RunAgentResult, error) {
+	cfg := deps.Config
+	agentName := req.Agent
+	prompt := req.Text
+
+	// Parse @mention if no explicit agent was provided.
+	if agentName == "" {
+		agentName, prompt = agents.ParseAgentMention(req.Text)
+	}
+	if prompt == "" {
+		prompt = req.Text
+	}
+
+	var agentOverride *agents.Agent
+	if agentName != "" {
+		a, loadErr := agents.LoadAgent(deps.AgentsDir, agentName)
+		if loadErr != nil {
+			log.Printf("daemon: agent %q not found: %v, using default", agentName, loadErr)
+			agentName = ""
+			prompt = req.Text
+		} else {
+			agentOverride = a
+		}
+	}
+
+	// Per-agent lock serializes concurrent messages to the same agent.
+	deps.SessionCache.Lock(agentName)
+	defer deps.SessionCache.Unlock(agentName)
+
+	sessMgr := deps.SessionCache.GetOrCreate(agentName)
+	sess := sessMgr.Current()
+	history := sess.Messages
+
+	loop := agent.NewAgentLoop(deps.GW, deps.Registry, cfg.ModelTier, deps.ShannonDir,
+		cfg.Agent.MaxIterations, cfg.Tools.ResultTruncation, cfg.Tools.ArgsTruncation,
+		&cfg.Permissions, deps.Auditor, deps.HookRunner)
+	loop.SetMaxTokens(cfg.Agent.MaxTokens)
+	loop.SetTemperature(cfg.Agent.Temperature)
+	loop.SetContextWindow(cfg.Agent.ContextWindow)
+	loop.SetEnableStreaming(false)
+	if agentOverride != nil {
+		loop.SetAgentOverride(agentOverride.Prompt, agentOverride.Memory)
+	}
+	if cfg.Agent.Model != "" {
+		loop.SetSpecificModel(cfg.Agent.Model)
+	}
+	if cfg.Agent.Thinking {
+		if cfg.Agent.ThinkingMode == "enabled" {
+			loop.SetThinking(&client.ThinkingConfig{Type: "enabled", BudgetTokens: cfg.Agent.ThinkingBudget})
+		} else {
+			loop.SetThinking(&client.ThinkingConfig{Type: "adaptive"})
+		}
+	}
+	if cfg.Agent.ReasoningEffort != "" {
+		loop.SetReasoningEffort(cfg.Agent.ReasoningEffort)
+	}
+	if mcpCtx := mcppkg.BuildContext(cfg.MCPServers); mcpCtx != "" {
+		loop.SetMCPContext(mcpCtx)
+	}
+	loop.SetHandler(handler)
+
+	// Wire handler to cloud_delegate tool so it can stream events.
+	if ct, ok := deps.Registry.Get("cloud_delegate"); ok {
+		if cdt, ok := ct.(*tools.CloudDelegateTool); ok {
+			cdt.SetHandler(handler)
+		}
+	}
+
+	result, usage, runErr := loop.Run(ctx, prompt, history)
+	if runErr != nil {
+		return nil, fmt.Errorf("agent error for %s: %w", agentName, runErr)
+	}
+
+	// Append the turn to the session and persist.
+	sess.Messages = append(sess.Messages,
+		client.Message{Role: "user", Content: client.NewTextContent(prompt)},
+		client.Message{Role: "assistant", Content: client.NewTextContent(result)},
+	)
+	if err := sessMgr.Save(); err != nil {
+		log.Printf("daemon: failed to save session: %v", err)
+	}
+
+	log.Printf("daemon: reply to %s (%d tokens, $%.4f)", agentName, usage.TotalTokens, usage.CostUSD)
+
+	return &RunAgentResult{
+		Reply:     result,
+		SessionID: sess.ID,
+		Agent:     agentName,
+		Usage: RunAgentUsage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+			CostUSD:      usage.CostUSD,
+		},
+	}, nil
+}

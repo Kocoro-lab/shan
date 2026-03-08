@@ -79,6 +79,12 @@ func (sc *SessionCache) getEntry(agent string) *agentEntry {
 	return entry
 }
 
+// SessionsDir returns the sessions directory for the given agent.
+// Empty agent name returns the default sessions directory.
+func (sc *SessionCache) SessionsDir(agent string) string {
+	return sc.sessionsDir(agent)
+}
+
 func (sc *SessionCache) sessionsDir(agent string) string {
 	if agent == "" {
 		return filepath.Join(sc.shannonDir, "sessions")
