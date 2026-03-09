@@ -106,6 +106,7 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	}
 	agentName := req.Agent
 	prompt := req.Text
+	explicitAgent := req.Agent != "" // explicitly requested, not parsed from @mention
 
 	// Parse @mention if no explicit agent was provided.
 	if agentName == "" {
@@ -119,6 +120,10 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	if agentName != "" {
 		a, loadErr := agents.LoadAgent(deps.AgentsDir, agentName)
 		if loadErr != nil {
+			if explicitAgent {
+				return nil, fmt.Errorf("agent not found: %s", agentName)
+			}
+			// @mention fallback: use default agent
 			log.Printf("daemon: agent %q not found: %v, using default", agentName, loadErr)
 			agentName = ""
 			prompt = req.Text
