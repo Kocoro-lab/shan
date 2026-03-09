@@ -14,8 +14,11 @@ import (
 
 	"github.com/Kocoro-lab/shan/internal/agent"
 	"github.com/Kocoro-lab/shan/internal/agents"
+	"github.com/Kocoro-lab/shan/internal/config"
 	"github.com/Kocoro-lab/shan/internal/session"
 	"github.com/Kocoro-lab/shan/internal/skills"
+	"github.com/Kocoro-lab/shan/internal/tools"
+	"gopkg.in/yaml.v3"
 )
 
 type Server struct {
@@ -59,6 +62,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("DELETE /agents/{name}/commands/{cmd}", s.handleDeleteCommand)
 	mux.HandleFunc("PUT /agents/{name}/skills/{skill}", s.handlePutSkill)
 	mux.HandleFunc("DELETE /agents/{name}/skills/{skill}", s.handleDeleteSkill)
+	mux.HandleFunc("GET /config", s.handleGetConfig)
+	mux.HandleFunc("PATCH /config", s.handlePatchConfig)
+	mux.HandleFunc("POST /config/reload", s.handleConfigReload)
+	mux.HandleFunc("GET /instructions", s.handleGetInstructions)
+	mux.HandleFunc("PUT /instructions", s.handlePutInstructions)
 	mux.HandleFunc("GET /sessions", s.handleSessions)
 	mux.HandleFunc("GET /sessions/search", s.handleSessionSearch)
 	mux.HandleFunc("POST /message", s.handleMessage)
@@ -652,4 +660,125 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// --- Global config + instructions handlers ---
+
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	globalPath := filepath.Join(s.deps.ShannonDir, "config.yaml")
+	globalData, _ := os.ReadFile(globalPath)
+	var globalMap map[string]interface{}
+	yaml.Unmarshal(globalData, &globalMap)
+
+	cfg, _ := s.deps.Snapshot()
+	effectiveJSON, _ := json.Marshal(cfg)
+	var effectiveMap map[string]interface{}
+	json.Unmarshal(effectiveJSON, &effectiveMap)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"global":    globalMap,
+		"effective": effectiveMap,
+	})
+}
+
+func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
+	var patch map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	globalPath := filepath.Join(s.deps.ShannonDir, "config.yaml")
+	globalData, _ := os.ReadFile(globalPath)
+	var current map[string]interface{}
+	if err := yaml.Unmarshal(globalData, &current); err != nil {
+		current = make(map[string]interface{})
+	}
+
+	for key, val := range patch {
+		if val == nil {
+			delete(current, key)
+		} else {
+			current[key] = val
+		}
+	}
+
+	data, err := yaml.Marshal(current)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := agents.AtomicWrite(globalPath, data); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
+	oldCfg, _ := s.deps.Snapshot()
+
+	newCfg, err := config.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("config load failed: %v", err))
+		return
+	}
+
+	newReg, newCleanup, regErr := tools.RegisterAll(s.deps.GW, newCfg)
+	if regErr != nil {
+		log.Printf("daemon: reload warning: %v", regErr)
+	}
+	tools.RegisterCloudDelegate(newReg, s.deps.GW, newCfg, nil, "", "")
+
+	s.deps.mu.Lock()
+	oldCleanup := s.deps.Cleanup
+	s.deps.Config = newCfg
+	s.deps.Registry = newReg
+	s.deps.Cleanup = newCleanup
+	s.deps.mu.Unlock()
+
+	if oldCleanup != nil {
+		oldCleanup()
+	}
+
+	resp := map[string]interface{}{"status": "reloaded"}
+	if oldCfg != nil && (oldCfg.Endpoint != newCfg.Endpoint || oldCfg.APIKey != newCfg.APIKey) {
+		resp["restart_required"] = true
+		resp["restart_reason"] = "endpoint or api_key changed — restart daemon to apply"
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleGetInstructions(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(s.deps.ShannonDir, "instructions.md")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"content": nil})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"content": string(data)})
+}
+
+func (s *Server) handlePutInstructions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content *string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	path := filepath.Join(s.deps.ShannonDir, "instructions.md")
+	if body.Content == nil {
+		os.Remove(path)
+	} else {
+		if err := agents.AtomicWrite(path, []byte(*body.Content)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
