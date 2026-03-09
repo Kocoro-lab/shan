@@ -427,6 +427,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Serialize creates for the same agent name to prevent concurrent rollback races.
+	s.deps.SessionCache.Lock(req.Name)
+	defer s.deps.SessionCache.Unlock(req.Name)
+
 	agentDir := filepath.Join(s.deps.AgentsDir, req.Name)
 	if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err == nil {
 		writeError(w, http.StatusConflict, fmt.Sprintf("agent %q already exists", req.Name))
