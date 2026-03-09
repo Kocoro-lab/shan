@@ -13,6 +13,7 @@ import (
 	"github.com/Kocoro-lab/shan/internal/config"
 	"github.com/Kocoro-lab/shan/internal/mcp"
 	"github.com/Kocoro-lab/shan/internal/schedule"
+	"github.com/Kocoro-lab/shan/internal/session"
 )
 
 // RegisterLocalTools registers only the local tools.
@@ -218,6 +219,14 @@ func resolveMCPServers(cfg *config.Config, agentDef ...*agents.Agent) map[string
 func ResolveMCPContext(cfg *config.Config, agentDef ...*agents.Agent) string {
 	servers := resolveMCPServers(cfg, agentDef...)
 	return mcp.BuildContext(servers)
+}
+
+// RegisterSessionSearch registers the session_search tool if a manager is available.
+func RegisterSessionSearch(reg *agent.ToolRegistry, mgr *session.Manager) {
+	if mgr == nil {
+		return
+	}
+	reg.Register(&SessionSearchTool{manager: mgr})
 }
 
 // RegisterCloudDelegate registers the cloud_delegate tool if cloud is enabled.
