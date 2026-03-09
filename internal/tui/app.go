@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -140,6 +142,8 @@ type Model struct {
 	headerSessions []session.SessionSummary // cached at startup for View()
 	headerTipIdx   int                      // stable random tip index
 	headerCWD      string                   // cached working directory
+	markdownCacheMu  sync.RWMutex
+	markdownCache    map[string]string
 }
 
 type slashCmd struct {
@@ -338,6 +342,7 @@ func New(cfg *config.Config, version string, agentOverride *agents.Agent) *Model
 		hookRunner:     hookRunner,
 		customCommands: customCmds,
 		agentOverride:  agentOverride,
+		markdownCache:  make(map[string]string),
 	}
 
 	return m
@@ -882,18 +887,39 @@ func (m *Model) runAgentLoop(query string, history []client.Message) tea.Cmd {
 
 func (m *Model) loadSessionHistory(sess *session.Session) {
 	m.output = nil
-	m.appendOutput(fmt.Sprintf("  Session: %s", sess.Title))
-	m.appendOutput("")
-	for _, msg := range sess.Messages {
-		switch msg.Role {
-		case "user":
-			pm := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(">")
-			m.appendOutput(fmt.Sprintf("%s %s", pm, msg.Content.Text()))
-		case "assistant":
-			m.appendOutput(renderMarkdown(msg.Content.Text(), m.width))
-			m.appendOutput("")
+	m.pendingPrints = nil
+
+	messages := append([]client.Message(nil), sess.Messages...)
+	width := m.width
+	m.sendOutput(fmt.Sprintf("  Session: %s", sess.Title))
+	m.sendOutput("")
+
+	if m.program == nil {
+		pm := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(">")
+		for _, msg := range messages {
+			switch msg.Role {
+			case "user":
+				m.appendOutput(fmt.Sprintf("%s %s", pm, msg.Content.Text()))
+			case "assistant":
+				m.appendOutput(m.renderMarkdownCached(msg.Content.Text(), width))
+				m.appendOutput("")
+			}
 		}
+		return
 	}
+
+	go func() {
+		pm := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(">")
+		for _, msg := range messages {
+			switch msg.Role {
+			case "user":
+				m.sendOutput(fmt.Sprintf("%s %s", pm, msg.Content.Text()))
+			case "assistant":
+				m.sendOutput(m.renderMarkdownCached(msg.Content.Text(), width))
+				m.sendOutput("")
+			}
+		}
+	}()
 }
 
 func (m *Model) appendOutput(text string) {
@@ -930,6 +956,26 @@ func (m *Model) flushPrints() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+func markdownCacheKey(text string, width int) string {
+	sum := sha256.Sum256([]byte(text))
+	return fmt.Sprintf("%d:%x", width, sum[:])
+}
+
+func (m *Model) renderMarkdownCached(text string, width int) string {
+	key := markdownCacheKey(text, width)
+	m.markdownCacheMu.RLock()
+	cached, ok := m.markdownCache[key]
+	m.markdownCacheMu.RUnlock()
+	if ok {
+		return cached
+	}
+	rendered := renderMarkdown(text, width)
+	m.markdownCacheMu.Lock()
+	m.markdownCache[key] = rendered
+	m.markdownCacheMu.Unlock()
+	return rendered
 }
 
 // Braille dot spinner frames (MiniDot style)
@@ -997,7 +1043,9 @@ func formatElapsed(d time.Duration) string {
 func (m *Model) sendOutput(text string) {
 	if m.program != nil {
 		m.program.Send(streamOutputMsg{text: text})
+		return
 	}
+	m.appendOutput(text)
 }
 
 // sendStatus sends an ephemeral status pill from a goroutine. It replaces the
@@ -1338,7 +1386,7 @@ func (m *Model) runRemote(query string, ctx map[string]any, strategy string) tea
 		}
 
 		if finalResult != "" {
-			m.sendOutput(renderMarkdown(finalResult, m.width))
+				m.sendOutput(m.renderMarkdownCached(finalResult, m.width))
 			sess := m.sessions.Current()
 			sess.Messages = append(sess.Messages,
 				client.Message{Role: "user", Content: client.NewTextContent(query)},
@@ -1450,7 +1498,7 @@ func (h *tuiEventHandler) OnToolResult(name string, args string, result agent.To
 }
 
 func (h *tuiEventHandler) OnText(text string) {
-	h.model.sendOutput(renderMarkdown(text, h.model.width))
+	h.model.sendOutput(h.model.renderMarkdownCached(text, h.model.width))
 }
 
 func (h *tuiEventHandler) OnStreamDelta(delta string) {
