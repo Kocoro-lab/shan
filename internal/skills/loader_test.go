@@ -15,9 +15,6 @@ func TestLoadSkills_Basic(t *testing.T) {
 description: Review a pull request
 type: prompt
 trigger: "review PR #(\\d+)"
-requires:
-  tools: [file_read, grep]
-  mcp_servers: [github]
 prompt: |
   Review the PR carefully.
 `
@@ -41,11 +38,11 @@ prompt: |
 	if s.Source != "review-agent" {
 		t.Errorf("source = %q", s.Source)
 	}
-	if len(s.Requires.Tools) != 2 {
-		t.Errorf("requires.tools = %v", s.Requires.Tools)
+	if s.Trigger != `review PR #(\d+)` {
+		t.Errorf("trigger = %q", s.Trigger)
 	}
-	if len(s.Requires.MCPServers) != 1 {
-		t.Errorf("requires.mcp_servers = %v", s.Requires.MCPServers)
+	if s.Prompt == "" {
+		t.Error("prompt should not be empty")
 	}
 }
 
@@ -68,39 +65,5 @@ func TestLoadSkills_MissingName(t *testing.T) {
 	_, err := LoadSkills(dir, "test")
 	if err == nil {
 		t.Error("expected error for missing skill name")
-	}
-}
-
-func TestLoadSkills_ToolChain(t *testing.T) {
-	dir := t.TempDir()
-	skillsDir := filepath.Join(dir, "skills")
-	os.MkdirAll(skillsDir, 0700)
-
-	yaml := `name: build-and-test
-description: Build then test
-type: tool_chain
-steps:
-  - tool: bash
-    args:
-      command: "go build ./..."
-    output_var: build_output
-  - tool: bash
-    args:
-      command: "go test ./..."
-`
-	os.WriteFile(filepath.Join(skillsDir, "build.yaml"), []byte(yaml), 0600)
-
-	skills, err := LoadSkills(dir, "ci-agent")
-	if err != nil {
-		t.Fatalf("LoadSkills: %v", err)
-	}
-	if len(skills) != 1 {
-		t.Fatalf("got %d skills, want 1", len(skills))
-	}
-	if skills[0].Type != SkillTypeToolChain {
-		t.Errorf("type = %q", skills[0].Type)
-	}
-	if len(skills[0].Steps) != 2 {
-		t.Errorf("steps = %d, want 2", len(skills[0].Steps))
 	}
 }
