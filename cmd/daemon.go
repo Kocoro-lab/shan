@@ -43,7 +43,6 @@ var daemonStartCmd = &cobra.Command{
 
 		gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
 		reg, cleanup, serverErr := tools.RegisterAll(gw, cfg)
-		defer cleanup()
 		if serverErr != nil {
 			log.Printf("Warning: %v", serverErr)
 		}
@@ -80,12 +79,18 @@ var daemonStartCmd = &cobra.Command{
 			Config:       cfg,
 			GW:           gw,
 			Registry:     reg,
+			Cleanup:      cleanup,
 			ShannonDir:   shanDir,
 			AgentsDir:    agentsDir,
 			Auditor:      auditor,
 			HookRunner:   hookRunner,
 			SessionCache: sessionCache,
 		}
+		defer func() {
+			if deps.Cleanup != nil {
+				deps.Cleanup()
+			}
+		}()
 
 		wsClient := daemon.NewClient(wsEndpoint, cfg.APIKey, func(msg daemon.MessagePayload) string {
 			req := daemon.RunAgentRequest{
