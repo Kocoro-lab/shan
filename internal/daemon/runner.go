@@ -118,10 +118,14 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	history := sess.Messages
 
 	// Clone and apply per-agent tool filter
-	reg := deps.Registry
+	reg := deps.Registry.Clone()
 	if agentOverride != nil {
-		reg = tools.ApplyToolFilter(deps.Registry.Clone(), agentOverride)
+		reg = tools.ApplyToolFilter(reg, agentOverride)
 	}
+	// Always expose local session search for daemon-served agents.
+	// Use the per-agent manager so searches are scoped to that agent's sessions.
+	tools.RegisterSessionSearch(reg, sessMgr)
+
 	loop := agent.NewAgentLoop(deps.GW, reg, cfg.ModelTier, deps.ShannonDir,
 		cfg.Agent.MaxIterations, cfg.Tools.ResultTruncation, cfg.Tools.ArgsTruncation,
 		&cfg.Permissions, deps.Auditor, deps.HookRunner)
