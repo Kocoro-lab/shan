@@ -408,6 +408,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, skill := range req.Skills {
+		if skill == nil {
+			writeError(w, http.StatusBadRequest, "skill entry cannot be null")
+			return
+		}
 		if err := agents.WriteAgentSkill(s.deps.AgentsDir, req.Name, skill); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("write skill %s: %v", skill.Name, err))
 			return
@@ -474,6 +478,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, skill := range req.Skills {
+		if skill == nil {
+			writeError(w, http.StatusBadRequest, "skill entry cannot be null")
+			return
+		}
 		if err := agents.ValidateCommandName(skill.Name); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -497,7 +505,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Memory != nil {
 		if isJSONNull(req.Memory) {
-			os.Remove(filepath.Join(agentDir, "MEMORY.md"))
+			if err := os.Remove(filepath.Join(agentDir, "MEMORY.md")); err != nil && !os.IsNotExist(err) {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete memory: %v", err))
+				return
+			}
 		} else {
 			if err := agents.WriteAgentMemory(s.deps.AgentsDir, name, *parsedMemory); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -507,7 +518,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Config != nil {
 		if isJSONNull(req.Config) {
-			os.Remove(filepath.Join(agentDir, "config.yaml"))
+			if err := os.Remove(filepath.Join(agentDir, "config.yaml")); err != nil && !os.IsNotExist(err) {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete config: %v", err))
+				return
+			}
 		} else {
 			if err := agents.WriteAgentConfig(s.deps.AgentsDir, name, parsedConfig); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -522,6 +536,10 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, skill := range req.Skills {
+		if skill == nil {
+			writeError(w, http.StatusBadRequest, "skill entry cannot be null")
+			return
+		}
 		if err := agents.WriteAgentSkill(s.deps.AgentsDir, name, skill); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("write skill %s: %v", skill.Name, err))
 			return
@@ -830,7 +848,10 @@ func (s *Server) handlePutInstructions(w http.ResponseWriter, r *http.Request) {
 	}
 	path := filepath.Join(s.deps.ShannonDir, "instructions.md")
 	if body.Content == nil {
-		os.Remove(path)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	} else {
 		if err := agents.AtomicWrite(path, []byte(*body.Content)); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

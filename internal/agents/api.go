@@ -200,6 +200,9 @@ func (r *AgentCreateRequest) Validate() error {
 		}
 	}
 	for _, s := range r.Skills {
+		if s == nil {
+			return fmt.Errorf("skill entry cannot be null")
+		}
 		if err := ValidateCommandName(s.Name); err != nil {
 			return err
 		}

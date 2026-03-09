@@ -114,4 +114,13 @@ func TestAgentCreateRequest_Validate(t *testing.T) {
 	if err := r.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	r = &AgentCreateRequest{
+		Name:     "bad-skill",
+		Prompt:   "hi",
+		Skills:   []*skills.Skill{nil},
+	}
+	if err := r.Validate(); err == nil {
+		t.Error("expected error for null skill entry")
+	}
 }
