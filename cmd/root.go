@@ -48,7 +48,7 @@ var rootCmd = &cobra.Command{
 
 		// Explicit --setup flag
 		if runSetup {
-			return config.RunSetup(cfg)
+			return config.RunSetup(cfg, os.Stdin, os.Stdout)
 		}
 
 		// First-run: no API key on remote endpoint
@@ -56,7 +56,7 @@ var rootCmd = &cobra.Command{
 			if !stdinIsTTY() {
 				return fmt.Errorf("no API key configured. Run 'shan --setup' to configure")
 			}
-			if err := config.RunSetup(cfg); err != nil {
+			if err := config.RunSetup(cfg, os.Stdin, os.Stdout); err != nil {
 				return err
 			}
 			fmt.Println("Setup complete. Run 'shan' again to start.")

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,11 @@ import (
 )
 
 const DefaultEndpoint = "https://api-dev.shannon.run"
+
+const (
+	hintCloud = "Get your API key at https://shannon.run"
+	hintLocal = "Running locally? See https://github.com/Kocoro-lab/Shannon for self-hosting docs."
+)
 
 // NeedsSetup returns true if the config has no API key and the endpoint
 // is not a local address (localhost/127.0.0.1 bypass auth).
@@ -26,18 +32,18 @@ func NeedsSetup(cfg *Config) bool {
 
 // RunSetup runs the interactive setup flow, prompting the user for
 // endpoint and API key. Returns the updated config.
-func RunSetup(cfg *Config) error {
-	reader := bufio.NewReader(os.Stdin)
+func RunSetup(cfg *Config, in io.Reader, out io.Writer) error {
+	reader := bufio.NewReader(in)
 
-	fmt.Println("Shannon CLI Setup")
-	fmt.Println()
+	fmt.Fprintln(out, "Shannon CLI Setup")
+	fmt.Fprintln(out)
 
 	// Endpoint
 	defaultEP := cfg.Endpoint
 	if defaultEP == "" {
 		defaultEP = DefaultEndpoint
 	}
-	fmt.Printf("API endpoint [%s]: ", defaultEP)
+	fmt.Fprintf(out, "API endpoint [%s]: ", defaultEP)
 	epInput, _ := reader.ReadString('\n')
 	epInput = strings.TrimSpace(epInput)
 	if epInput != "" {
@@ -46,38 +52,66 @@ func RunSetup(cfg *Config) error {
 		cfg.Endpoint = defaultEP
 	}
 
-	// API key (optional for local endpoints)
+	// Contextual hint
 	if isLocalEndpoint(cfg.Endpoint) {
-		fmt.Print("API key (optional for local, Enter to skip): ")
+		fmt.Fprintln(out, hintLocal)
 	} else {
-		fmt.Print("API key: ")
+		fmt.Fprintln(out, hintCloud)
 	}
+	fmt.Fprintln(out)
 
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		keyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println() // newline after masked input
-		if err == nil {
-			cfg.APIKey = strings.TrimSpace(string(keyBytes))
+	// API key + health check with retry (max 3 attempts)
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Prompt for key
+		if isLocalEndpoint(cfg.Endpoint) {
+			fmt.Fprint(out, "API key (optional for local, Enter to skip): ")
+		} else {
+			fmt.Fprint(out, "API key: ")
 		}
-	} else {
-		keyInput, _ := reader.ReadString('\n')
-		cfg.APIKey = strings.TrimSpace(keyInput)
-	}
 
-	// Health check
-	fmt.Print("Testing connection... ")
-	if err := checkEndpointHealth(cfg.Endpoint, cfg.APIKey); err != nil {
-		fmt.Printf("FAILED (%v)\n", err)
-		fmt.Println("Config saved anyway. You can re-run /setup to fix.")
-	} else {
-		fmt.Println("OK")
+		if f, ok := in.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+			keyBytes, err := term.ReadPassword(int(f.Fd()))
+			fmt.Fprintln(out) // newline after masked input
+			if err != nil {
+				fmt.Fprintf(out, "Error reading key: %v\n", err)
+				continue
+			}
+			cfg.APIKey = strings.TrimSpace(string(keyBytes))
+		} else {
+			keyInput, _ := reader.ReadString('\n')
+			cfg.APIKey = strings.TrimSpace(keyInput)
+		}
+
+		// Health check
+		fmt.Fprint(out, "Testing connection... ")
+		if err := checkEndpointHealth(cfg.Endpoint, cfg.APIKey); err != nil {
+			fmt.Fprintf(out, "FAILED (%v)\n", err)
+
+			if attempt == maxAttempts-1 {
+				// Exhausted all attempts
+				fmt.Fprintln(out, "Config saved anyway. Re-run 'shan --setup' to fix.")
+				break
+			}
+			fmt.Fprint(out, "Re-enter credentials? [Y/n]: ")
+			ans, _ := reader.ReadString('\n')
+			ans = strings.TrimSpace(strings.ToLower(ans))
+			if ans == "n" || ans == "no" {
+				fmt.Fprintln(out, "Config saved anyway. Re-run 'shan --setup' to fix.")
+				break
+			}
+			continue
+		}
+
+		fmt.Fprintln(out, "OK")
+		break
 	}
 
 	if err := Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	fmt.Printf("Config saved to %s/config.yaml\n", ShannonDir())
-	fmt.Println()
+	fmt.Fprintf(out, "Config saved to %s/config.yaml\n", ShannonDir())
+	fmt.Fprintln(out)
 	return nil
 }
 
