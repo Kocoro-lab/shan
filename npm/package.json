@@ -1,6 +1,6 @@
 {
   "name": "@kocoro/shan",
-  "version": "0.2.0",
+  "version": "0.2.5",
   "description": "AI-powered CLI agent with local tools, permissions, and session management",
   "bin": {
     "shan": "bin/shan"
@@ -8,14 +8,26 @@
   "scripts": {
     "postinstall": "node install.js"
   },
-  "os": ["darwin", "linux"],
-  "cpu": ["x64", "arm64"],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Kocoro-lab/shan"
   },
   "homepage": "https://github.com/Kocoro-lab/shan",
-  "keywords": ["cli", "ai", "agent", "shannon", "llm"],
+  "keywords": [
+    "cli",
+    "ai",
+    "agent",
+    "shannon",
+    "llm"
+  ],
   "license": "Apache-2.0",
   "author": "Kocoro-lab"
 }
