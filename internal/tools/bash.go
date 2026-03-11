@@ -14,6 +14,7 @@ import (
 type BashTool struct {
 	approvalFn        func(command string) bool
 	ExtraSafeCommands []string
+	CWD               string // working directory for commands (empty = inherit process cwd)
 }
 
 type bashArgs struct {
@@ -84,6 +85,9 @@ func (t *BashTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, 
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", args.Command)
+	if t.CWD != "" {
+		cmd.Dir = t.CWD
+	}
 	output, err := cmd.CombinedOutput()
 
 	result := string(output)

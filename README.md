@@ -152,24 +152,26 @@ shan -y "copy the current date to my clipboard"
 shan -y "read my clipboard and summarize the content"
 ```
 
-**GUI Interaction via Accessibility Tree** — `accessibility` (primary: read UI elements, click/type by ref)
+**GUI Interaction via Accessibility Tree** — `accessibility`, `wait_for` (annotate → click by ref)
 ```bash
+shan -y "annotate the Finder window and tell me what you see"
 shan -y "open Calendar and show me today's events"
 shan -y "open System Settings and check my display resolution"
 shan -y "open Finder to Downloads and list the files"
 shan -y "open TextEdit, create a new document, and type 'hello world'"
-shan -y "open Reminders and mark 'Buy groceries' as done"
+shan -y "open Notes and type '你好世界 🌍'"
+shan -y "find the search field in Safari and type 'shannon ai'"
 ```
 
-**Screenshot & Computer Use** — `screenshot`, `computer` (vision fallback: act → screenshot → observe → decide)
+**Screenshot & Computer Use** — `screenshot`, `computer` (vision + CGEvent, CJK/emoji safe)
 ```bash
 shan -y "take a screenshot and tell me what's on my screen"
 shan -y "open LINE app and bring it to the front"
-shan -y "open Chrome, search for 'vivaia', and list the first 5 results"
+shan -y "open Chrome, go to x.com, and post a tweet"
 shan -y "click on the Finder icon in the dock"
 ```
 
-**Browser Automation** — `browser` (isolated Chrome via chromedp)
+**Browser Automation** — `browser` (pinchtab for real browser, chromedp fallback)
 ```bash
 shan -y "open https://news.ycombinator.com and get the top 5 stories"
 shan -y "navigate to waylandz.com and take a browser screenshot"
@@ -204,11 +206,9 @@ shan "show all tables in the database"
 
 ## Requirements
 
-- **macOS** (clipboard, notifications, AppleScript, screencapture, Quartz mouse control)
+- **macOS** (clipboard, notifications, AppleScript, screencapture, accessibility)
 - **Shannon Gateway** at configurable endpoint (for LLM completions + remote tools)
-- **Swift toolchain** (Xcode CLI tools, for `accessibility` tool — present on all standard macOS installs)
-- **Accessibility permission** granted in System Settings > Privacy & Security > Accessibility (for `accessibility` tool)
-- **Python 3 + pyobjc-framework-Quartz** (optional, for `computer` tool mouse/click control)
+- **Accessibility permission** granted in System Settings > Privacy & Security > Accessibility (for `accessibility` and `computer` tools)
 - **Chrome** (optional, for `browser` tool — chromedp with isolated profile)
 - **[Ghostty](https://ghostty.org) >= 1.3.0** (optional, for `ghostty` tool — terminal tabs, splits, input)
 
@@ -300,13 +300,14 @@ Local tools executed on your macOS machine:
 
 | Tool | Approval | Description |
 |------|----------|-------------|
-| `accessibility` | Yes | **Primary GUI tool.** Reads macOS accessibility tree (AXUIElement), interact by ref: `read_tree`, `click`, `press`, `set_value`, `get_value`. Works with Finder, Safari, TextEdit, Calendar, System Settings, etc. |
+| `accessibility` | Yes | **Primary GUI tool.** Reads macOS accessibility tree via persistent `ax_server` (compiled Swift sidecar). Actions: `read_tree`, `click`, `press`, `set_value`, `get_value`, `find`, `scroll`, `annotate`. Semantic depth traversal (layout containers cost 0), click auto-fallback (AXPress → synthetic coordinate click). Works with Finder, Safari, Chrome, TextEdit, Calendar, System Settings, etc. |
+| `wait_for` | Yes | Wait for UI conditions: `elementExists`, `elementGone`, `titleContains`, `urlContains`, `titleChanged`, `urlChanged`. Use instead of sleep after navigation or app launch. |
 | `clipboard` | Yes | Read/write system clipboard (pbcopy/pbpaste) |
 | `notify` | Yes | macOS desktop notifications via osascript |
 | `applescript` | Yes | Execute arbitrary AppleScript. Use for operations with no AX equivalent (e.g., "tell Finder to empty trash") |
 | `screenshot` | Yes | Screen capture (fullscreen/window/region). Visual fallback when accessibility tree is insufficient |
-| `computer` | Yes | Coordinate-based mouse/keyboard. Fallback when accessibility refs don't work or for drag operations |
-| `browser` | Yes | Chromedp with isolated Chrome profile (navigate/click/type/screenshot/read_page/execute_js/wait/close) |
+| `computer` | Yes | Mouse/keyboard via CGEvent (CJK/emoji safe). Click, type, hotkey, move, screenshot. Fallback when accessibility refs don't work or for drag operations. No Python dependency. |
+| `browser` | Yes | Browser automation via pinchtab (preferred) or chromedp fallback. Isolated profile for web scraping; pinchtab connects to user's real browser for authenticated sessions. |
 
 ### Scheduling
 
