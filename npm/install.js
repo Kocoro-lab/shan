@@ -84,6 +84,11 @@ async function main() {
   fs.writeFileSync(tmpTar, tarball);
   try {
     execFileSync("tar", ["-xzf", "_shan.tar.gz", "shan"], { cwd: BIN_DIR });
+    // ax_server is only present in darwin archives — not an error on linux
+    try {
+      execFileSync("tar", ["-xzf", "_shan.tar.gz", "ax_server"], { cwd: BIN_DIR });
+      fs.chmodSync(path.join(BIN_DIR, "ax_server"), 0o755);
+    } catch (_) {}
   } finally {
     fs.unlinkSync(tmpTar);
   }

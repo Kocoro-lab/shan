@@ -13,3 +13,5 @@ shannon
 *.log
 docs/plans/
 docs/superpowers/
+docs/design/
+internal/tools/axserver/.build/

@@ -33,7 +33,10 @@ func TestVisionLoop_ScreenshotReturnsImage(t *testing.T) {
 }
 
 func TestVisionLoop_ComputerScreenshotAction(t *testing.T) {
-	ct := &tools.ComputerTool{}
+	// Screenshot action doesn't use ax_server, so nil client is fine
+	reg, cleanup := tools.RegisterLocalTools(nil)
+	defer cleanup()
+	ct, _ := reg.Get("computer")
 	result, err := ct.Run(context.Background(), `{"action":"screenshot"}`)
 	if err != nil {
 		t.Fatalf("computer screenshot error: %v", err)
@@ -50,14 +53,15 @@ func TestVisionLoop_ComputerScreenshotAction(t *testing.T) {
 
 func TestVisionLoop_ComputerNativeLeftClick(t *testing.T) {
 	// Test that Anthropic native left_click with coordinate array parses correctly
-	// Don't actually execute (no Quartz in CI), just verify args normalization
-	ct := &tools.ComputerTool{}
+	// Will fail with ax_server error since we're not in a real GUI context,
+	// but that's fine — it means the action was correctly mapped to "click"
+	reg, cleanup := tools.RegisterLocalTools(nil)
+	defer cleanup()
+	ct, _ := reg.Get("computer")
 	result, err := ct.Run(context.Background(), `{"action":"left_click","coordinate":[640,400]}`)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	// Will fail with "click/move requires pyobjc-framework-Quartz" if Quartz not installed,
-	// but that's fine — it means the action was correctly mapped to "click"
 	t.Logf("Result: %s (isError: %v)", result.Content, result.IsError)
 	if result.IsError && result.Content == `unknown action: "left_click"` {
 		t.Fatal("left_click was NOT normalized to click — normalizeArgs not called")

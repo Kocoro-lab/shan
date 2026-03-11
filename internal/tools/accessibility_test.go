@@ -7,7 +7,7 @@ import (
 )
 
 func TestAccessibility_Info(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	info := tool.Info()
 	if info.Name != "accessibility" {
 		t.Errorf("expected name 'accessibility', got %q", info.Name)
@@ -27,14 +27,14 @@ func TestAccessibility_Info(t *testing.T) {
 }
 
 func TestAccessibility_RequiresApproval(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	if !tool.RequiresApproval() {
 		t.Error("expected RequiresApproval to return true")
 	}
 }
 
 func TestAccessibility_InvalidJSON(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `not valid json`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -45,7 +45,7 @@ func TestAccessibility_InvalidJSON(t *testing.T) {
 }
 
 func TestAccessibility_MissingAction(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -59,7 +59,7 @@ func TestAccessibility_MissingAction(t *testing.T) {
 }
 
 func TestAccessibility_UnknownAction(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{"action": "fly"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -73,7 +73,7 @@ func TestAccessibility_UnknownAction(t *testing.T) {
 }
 
 func TestAccessibility_ClickMissingRef(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{"action": "click"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -84,7 +84,7 @@ func TestAccessibility_ClickMissingRef(t *testing.T) {
 }
 
 func TestAccessibility_ClickUnknownRef(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	tool.refs = map[string]refEntry{"e1": {path: "window[0]", pid: 1}}
 	result, err := tool.Run(context.Background(), `{"action": "click", "ref": "e99"}`)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestAccessibility_ClickUnknownRef(t *testing.T) {
 }
 
 func TestAccessibility_SetValueMissingValue(t *testing.T) {
-	tool := &AccessibilityTool{}
+	tool := &AccessibilityTool{client: &AXClient{}}
 	tool.refs = map[string]refEntry{"e1": {path: "window[0]/AXTextField[0]", role: "AXTextField", pid: 1}}
 	result, err := tool.Run(context.Background(), `{"action": "set_value", "ref": "e1"}`)
 	if err != nil {
@@ -107,5 +107,16 @@ func TestAccessibility_SetValueMissingValue(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected error for set_value without value")
+	}
+}
+
+func TestAccessibility_NilClient(t *testing.T) {
+	tool := &AccessibilityTool{} // no client
+	result, err := tool.Run(context.Background(), `{"action": "read_tree"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error for nil client")
 	}
 }

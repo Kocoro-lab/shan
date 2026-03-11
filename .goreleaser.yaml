@@ -18,8 +18,10 @@ archives:
   - format: tar.gz
     name_template: "shan_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - src: internal/tools/scripts/ax_helper.swift
-        dst: scripts
+      # ax_server is built by CI (macOS only). Present in dist/ at release time.
+      # Included in all archives; Linux users get an unused binary (~2-3MB).
+      - src: dist/ax_server
+        dst: .
         strip_parent: true
 
 checksum:

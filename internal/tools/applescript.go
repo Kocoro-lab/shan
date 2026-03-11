@@ -93,3 +93,12 @@ func splitScriptLines(script string) []string {
 	}
 	return result
 }
+
+// escapeAppleScript escapes a string for safe embedding in AppleScript string literals.
+func escapeAppleScript(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	return s
+}

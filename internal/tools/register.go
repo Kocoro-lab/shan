@@ -44,13 +44,14 @@ func RegisterLocalTools(cfg *config.Config) (*agent.ToolRegistry, func()) {
 	reg.Register(&NotifyTool{})
 	reg.Register(&ProcessTool{})
 	reg.Register(&AppleScriptTool{})
-	reg.Register(&AccessibilityTool{})
+	axClient := &AXClient{}
+	reg.Register(&AccessibilityTool{client: axClient})
 	reg.Register(&GhosttyTool{tabs: newTabRegistry()})
 
 	browser := &BrowserTool{}
 	reg.Register(browser)
 	reg.Register(&ScreenshotTool{})
-	reg.Register(&ComputerTool{})
+	reg.Register(&ComputerTool{client: axClient})
 
 	// Schedule tools
 	if shanDir := config.ShannonDir(); shanDir != "" {
@@ -67,6 +68,7 @@ func RegisterLocalTools(cfg *config.Config) (*agent.ToolRegistry, func()) {
 
 	cleanup := func() {
 		browser.Cleanup()
+		axClient.Close()
 	}
 	return reg, cleanup
 }

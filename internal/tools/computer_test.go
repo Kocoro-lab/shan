@@ -2,12 +2,11 @@ package tools
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
 func TestComputer_Info(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	info := tool.Info()
 	if info.Name != "computer" {
 		t.Errorf("expected name 'computer', got %q", info.Name)
@@ -27,14 +26,14 @@ func TestComputer_Info(t *testing.T) {
 }
 
 func TestComputer_RequiresApproval(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	if !tool.RequiresApproval() {
 		t.Error("expected RequiresApproval to return true")
 	}
 }
 
 func TestComputer_InvalidArgs(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `not valid json`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -45,7 +44,7 @@ func TestComputer_InvalidArgs(t *testing.T) {
 }
 
 func TestComputer_MissingAction(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -59,7 +58,7 @@ func TestComputer_MissingAction(t *testing.T) {
 }
 
 func TestComputer_UnknownAction(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{"action": "fly"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -73,7 +72,7 @@ func TestComputer_UnknownAction(t *testing.T) {
 }
 
 func TestComputer_TypeMissingText(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{"action": "type"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -87,7 +86,7 @@ func TestComputer_TypeMissingText(t *testing.T) {
 }
 
 func TestComputer_HotkeyMissingKeys(t *testing.T) {
-	tool := &ComputerTool{}
+	tool := &ComputerTool{client: &AXClient{}}
 	result, err := tool.Run(context.Background(), `{"action": "hotkey"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -100,118 +99,21 @@ func TestComputer_HotkeyMissingKeys(t *testing.T) {
 	}
 }
 
-func TestComputer_BuildClickScript_LeftSingle(t *testing.T) {
-	script := buildClickScript(100, 200, "", 0)
-	if !strings.Contains(script, "(100, 200)") {
-		t.Errorf("expected coordinates (100, 200) in script, got:\n%s", script)
+func TestComputer_EscapeAppleScript(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`hello`, `hello`},
+		{`say "hi"`, `say \"hi\"`},
+		{"line1\nline2", `line1\nline2`},
+		{`back\slash`, `back\\slash`},
 	}
-	if !strings.Contains(script, "kCGEventLeftMouseDown") {
-		t.Errorf("expected kCGEventLeftMouseDown in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "kCGEventLeftMouseUp") {
-		t.Errorf("expected kCGEventLeftMouseUp in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "range(1)") {
-		t.Errorf("expected range(1) for single click, got:\n%s", script)
-	}
-}
-
-func TestComputer_BuildClickScript_RightDouble(t *testing.T) {
-	script := buildClickScript(50, 75, "right", 2)
-	if !strings.Contains(script, "(50, 75)") {
-		t.Errorf("expected coordinates (50, 75) in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "kCGEventRightMouseDown") {
-		t.Errorf("expected kCGEventRightMouseDown in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "kCGEventRightMouseUp") {
-		t.Errorf("expected kCGEventRightMouseUp in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "range(2)") {
-		t.Errorf("expected range(2) for double click, got:\n%s", script)
-	}
-}
-
-func TestComputer_BuildMoveScript(t *testing.T) {
-	script := buildMoveScript(300, 400)
-	if !strings.Contains(script, "(300, 400)") {
-		t.Errorf("expected coordinates (300, 400) in script, got:\n%s", script)
-	}
-	if !strings.Contains(script, "kCGEventMouseMoved") {
-		t.Errorf("expected kCGEventMouseMoved in script, got:\n%s", script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_SingleKey(t *testing.T) {
-	script, err := buildHotkeyScript("a")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	expected := `tell application "System Events" to keystroke "a"`
-	if script != expected {
-		t.Errorf("expected %q, got %q", expected, script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_CommandC(t *testing.T) {
-	script, err := buildHotkeyScript("command+c")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, `keystroke "c"`) {
-		t.Errorf("expected keystroke c in script, got: %s", script)
-	}
-	if !strings.Contains(script, "command down") {
-		t.Errorf("expected command down in script, got: %s", script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_CmdAlias(t *testing.T) {
-	script, err := buildHotkeyScript("cmd+v")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "command down") {
-		t.Errorf("expected command down for cmd alias, got: %s", script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_MultiModifier(t *testing.T) {
-	script, err := buildHotkeyScript("command+shift+4")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "command down") {
-		t.Errorf("expected command down in script, got: %s", script)
-	}
-	if !strings.Contains(script, "shift down") {
-		t.Errorf("expected shift down in script, got: %s", script)
-	}
-	if !strings.Contains(script, `keystroke "4"`) {
-		t.Errorf("expected keystroke 4 in script, got: %s", script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_AltCtrl(t *testing.T) {
-	script, err := buildHotkeyScript("alt+ctrl+t")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "option down") {
-		t.Errorf("expected option down for alt, got: %s", script)
-	}
-	if !strings.Contains(script, "control down") {
-		t.Errorf("expected control down for ctrl, got: %s", script)
-	}
-}
-
-func TestComputer_BuildHotkeyScript_UnknownModifier(t *testing.T) {
-	_, err := buildHotkeyScript("super+a")
-	if err == nil {
-		t.Error("expected error for unknown modifier 'super'")
-	}
-	if !strings.Contains(err.Error(), "unknown modifier") {
-		t.Errorf("expected 'unknown modifier' in error, got: %s", err.Error())
+	for _, tc := range tests {
+		got := escapeAppleScript(tc.input)
+		if got != tc.expected {
+			t.Errorf("escapeAppleScript(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
 	}
 }
 
@@ -285,7 +187,7 @@ func TestComputer_NormalizeArgs_NoOp(t *testing.T) {
 }
 
 func TestComputer_ScaleXY(t *testing.T) {
-	tool := &ComputerTool{screenW: 1440, screenH: 900}
+	tool := &ComputerTool{client: &AXClient{}, screenW: 1440, screenH: 900}
 	x, y := tool.scaleXY(640, 400)
 	if x != 720 || y != 450 {
 		t.Errorf("expected (720, 450), got (%d, %d)", x, y)
@@ -294,7 +196,7 @@ func TestComputer_ScaleXY(t *testing.T) {
 
 func TestComputer_ScaleXY_DefaultFallback(t *testing.T) {
 	// When screen dims match API dims, no scaling
-	tool := &ComputerTool{screenW: 1280, screenH: 800}
+	tool := &ComputerTool{client: &AXClient{}, screenW: 1280, screenH: 800}
 	x, y := tool.scaleXY(100, 200)
 	if x != 100 || y != 200 {
 		t.Errorf("expected (100, 200), got (%d, %d)", x, y)

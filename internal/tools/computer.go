@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 )
 
 type ComputerTool struct {
+	client  *AXClient
 	screenW int
 	screenH int
 }
@@ -132,19 +132,6 @@ func (t *ComputerTool) NativeToolDef() *client.NativeToolDef {
 	}
 }
 
-var quartzChecked bool
-var quartzAvailable bool
-
-func checkQuartz() bool {
-	if quartzChecked {
-		return quartzAvailable
-	}
-	quartzChecked = true
-	err := exec.CommandContext(context.Background(), "python3", "-c", "import Quartz").Run()
-	quartzAvailable = err == nil
-	return quartzAvailable
-}
-
 func (t *ComputerTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, error) {
 	var args computerArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -158,16 +145,28 @@ func (t *ComputerTool) Run(ctx context.Context, argsJSON string) (agent.ToolResu
 	normalizeArgs(&args)
 
 	switch args.Action {
-	case "click":
-		return t.click(ctx, args)
-	case "type":
-		return t.typeText(ctx, args)
-	case "hotkey":
-		return t.hotkey(ctx, args)
-	case "move":
-		return t.move(ctx, args)
 	case "screenshot":
 		return t.screenshot()
+	case "click":
+		if t.client == nil {
+			return agent.ToolResult{Content: "computer tool requires macOS with ax_server", IsError: true}, nil
+		}
+		return t.click(ctx, args)
+	case "type":
+		if t.client == nil {
+			return agent.ToolResult{Content: "computer tool requires macOS with ax_server", IsError: true}, nil
+		}
+		return t.typeText(ctx, args)
+	case "hotkey":
+		if t.client == nil {
+			return agent.ToolResult{Content: "computer tool requires macOS with ax_server", IsError: true}, nil
+		}
+		return t.hotkey(ctx, args)
+	case "move":
+		if t.client == nil {
+			return agent.ToolResult{Content: "computer tool requires macOS with ax_server", IsError: true}, nil
+		}
+		return t.move(ctx, args)
 	default:
 		return agent.ToolResult{
 			Content: fmt.Sprintf("unknown action: %q (valid: click, type, hotkey, move, screenshot)", args.Action),
@@ -188,29 +187,30 @@ func (t *ComputerTool) screenshot() (agent.ToolResult, error) {
 }
 
 func (t *ComputerTool) click(ctx context.Context, args computerArgs) (agent.ToolResult, error) {
-	if !checkQuartz() {
-		return agent.ToolResult{
-			Content: "click/move requires pyobjc-framework-Quartz. Install with: pip3 install pyobjc-framework-Quartz",
-			IsError: true,
-		}, nil
-	}
 	x, y := t.scaleXY(args.X, args.Y)
-	script := buildClickScript(x, y, args.Button, args.Clicks)
-	out, err := exec.CommandContext(ctx, "python3", "-c", script).CombinedOutput()
-	if err != nil {
-		return agent.ToolResult{
-			Content: fmt.Sprintf("click error: %v\n%s", err, string(out)),
-			IsError: true,
-		}, nil
+	button := args.Button
+	if button == "" {
+		button = "left"
 	}
 	clicks := args.Clicks
 	if clicks < 1 {
 		clicks = 1
 	}
-	button := args.Button
-	if button == "" {
-		button = "left"
+
+	_, err := t.client.Call(ctx, "mouse_event", map[string]any{
+		"type":   "click",
+		"x":      float64(x),
+		"y":      float64(y),
+		"button": button,
+		"clicks": clicks,
+	})
+	if err != nil {
+		return agent.ToolResult{
+			Content: fmt.Sprintf("click error: %v", err),
+			IsError: true,
+		}, nil
 	}
+
 	result := agent.ToolResult{Content: fmt.Sprintf("Clicked %s button %d time(s) at (%d, %d)", button, clicks, x, y)}
 	return t.captureAfterAction(result), nil
 }
@@ -220,38 +220,15 @@ func (t *ComputerTool) typeText(ctx context.Context, args computerArgs) (agent.T
 		return agent.ToolResult{Content: "type action requires 'text' parameter", IsError: true}, nil
 	}
 
-	// For short text (≤20 chars), use direct keystroke — fast and reliable.
-	// For longer text, use clipboard paste to avoid focus-loss races during
-	// character-by-character keystroke delivery.
-	if len([]rune(args.Text)) <= 20 {
-		escaped := escapeAppleScript(args.Text)
-		script := fmt.Sprintf(`tell application "System Events" to keystroke "%s"`, escaped)
-		out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
-		if err != nil {
-			return agent.ToolResult{
-				Content: fmt.Sprintf("type error: %v\n%s", err, string(out)),
-				IsError: true,
-			}, nil
-		}
-	} else {
-		// Save clipboard, paste text, restore clipboard
-		escaped := escapeAppleScript(args.Text)
-		script := fmt.Sprintf(`
-set savedClip to the clipboard
-set the clipboard to "%s"
-delay 0.05
-tell application "System Events" to keystroke "v" using {command down}
-delay 0.1
-try
-	set the clipboard to savedClip
-end try`, escaped)
-		out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
-		if err != nil {
-			return agent.ToolResult{
-				Content: fmt.Sprintf("type error: %v\n%s", err, string(out)),
-				IsError: true,
-			}, nil
-		}
+	// ax_server handles CJK/non-ASCII via clipboard paste automatically
+	_, err := t.client.Call(ctx, "type_text", map[string]any{
+		"value": args.Text,
+	})
+	if err != nil {
+		return agent.ToolResult{
+			Content: fmt.Sprintf("type error: %v", err),
+			IsError: true,
+		}, nil
 	}
 
 	result := agent.ToolResult{Content: fmt.Sprintf("Typed: %s", args.Text)}
@@ -262,117 +239,48 @@ func (t *ComputerTool) hotkey(ctx context.Context, args computerArgs) (agent.Too
 	if args.Keys == "" {
 		return agent.ToolResult{Content: "hotkey action requires 'keys' parameter", IsError: true}, nil
 	}
-	script, err := buildHotkeyScript(args.Keys)
-	if err != nil {
-		return agent.ToolResult{Content: err.Error(), IsError: true}, nil
-	}
-	out, execErr := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
-	if execErr != nil {
-		return agent.ToolResult{
-			Content: fmt.Sprintf("hotkey error: %v\n%s", execErr, string(out)),
-			IsError: true,
-		}, nil
-	}
-	result := agent.ToolResult{Content: fmt.Sprintf("Pressed: %s", args.Keys)}
-	return t.captureAfterAction(result), nil
-}
 
-func (t *ComputerTool) move(ctx context.Context, args computerArgs) (agent.ToolResult, error) {
-	if !checkQuartz() {
-		return agent.ToolResult{
-			Content: "click/move requires pyobjc-framework-Quartz. Install with: pip3 install pyobjc-framework-Quartz",
-			IsError: true,
-		}, nil
-	}
-	x, y := t.scaleXY(args.X, args.Y)
-	script := buildMoveScript(x, y)
-	out, err := exec.CommandContext(ctx, "python3", "-c", script).CombinedOutput()
-	if err != nil {
-		return agent.ToolResult{
-			Content: fmt.Sprintf("move error: %v\n%s", err, string(out)),
-			IsError: true,
-		}, nil
-	}
-	result := agent.ToolResult{Content: fmt.Sprintf("Moved cursor to (%d, %d)", x, y)}
-	return t.captureAfterAction(result), nil
-}
-
-func buildClickScript(x, y int, button string, clicks int) string {
-	if clicks < 1 {
-		clicks = 1
-	}
-	if button == "" {
-		button = "left"
-	}
-
-	mouseButton := "kCGMouseButtonLeft"
-	mouseDown := "kCGEventLeftMouseDown"
-	mouseUp := "kCGEventLeftMouseUp"
-	if button == "right" {
-		mouseButton = "kCGMouseButtonRight"
-		mouseDown = "kCGEventRightMouseDown"
-		mouseUp = "kCGEventRightMouseUp"
-	}
-
-	return fmt.Sprintf(`import Quartz
-point = (%d, %d)
-for i in range(%d):
-    event = Quartz.CGEventCreateMouseEvent(None, Quartz.%s, point, Quartz.%s)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-    event = Quartz.CGEventCreateMouseEvent(None, Quartz.%s, point, Quartz.%s)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-`, x, y, clicks, mouseDown, mouseButton, mouseUp, mouseButton)
-}
-
-func buildMoveScript(x, y int) string {
-	return fmt.Sprintf(`import Quartz
-point = (%d, %d)
-event = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, point, Quartz.kCGMouseButtonLeft)
-Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-`, x, y)
-}
-
-// escapeAppleScript escapes a string for safe embedding in AppleScript string literals.
-func escapeAppleScript(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	return s
-}
-
-var modifierMap = map[string]string{
-	"command": "command down",
-	"cmd":     "command down",
-	"shift":   "shift down",
-	"option":  "option down",
-	"alt":     "option down",
-	"control": "control down",
-	"ctrl":    "control down",
-}
-
-func buildHotkeyScript(keys string) (string, error) {
-	parts := strings.Split(strings.ToLower(keys), "+")
+	parts := strings.Split(strings.ToLower(args.Keys), "+")
 	if len(parts) == 0 {
-		return "", fmt.Errorf("invalid key combination: %q", keys)
+		return agent.ToolResult{Content: fmt.Sprintf("invalid key combination: %q", args.Keys), IsError: true}, nil
 	}
 
 	key := strings.TrimSpace(parts[len(parts)-1])
 	var modifiers []string
 	for _, part := range parts[:len(parts)-1] {
-		part = strings.TrimSpace(part)
-		mod, ok := modifierMap[part]
-		if !ok {
-			return "", fmt.Errorf("unknown modifier: %q (valid: command, cmd, shift, option, alt, control, ctrl)", part)
-		}
-		modifiers = append(modifiers, mod)
+		modifiers = append(modifiers, strings.TrimSpace(part))
 	}
 
-	escapedKey := escapeAppleScript(key)
-	if len(modifiers) == 0 {
-		return fmt.Sprintf(`tell application "System Events" to keystroke "%s"`, escapedKey), nil
+	_, err := t.client.Call(ctx, "key_event", map[string]any{
+		"key":       key,
+		"modifiers": modifiers,
+	})
+	if err != nil {
+		return agent.ToolResult{
+			Content: fmt.Sprintf("hotkey error: %v", err),
+			IsError: true,
+		}, nil
 	}
 
-	modStr := strings.Join(modifiers, ", ")
-	return fmt.Sprintf(`tell application "System Events" to keystroke "%s" using {%s}`, escapedKey, modStr), nil
+	result := agent.ToolResult{Content: fmt.Sprintf("Pressed: %s", args.Keys)}
+	return t.captureAfterAction(result), nil
+}
+
+func (t *ComputerTool) move(ctx context.Context, args computerArgs) (agent.ToolResult, error) {
+	x, y := t.scaleXY(args.X, args.Y)
+
+	_, err := t.client.Call(ctx, "mouse_event", map[string]any{
+		"type": "move",
+		"x":    float64(x),
+		"y":    float64(y),
+	})
+	if err != nil {
+		return agent.ToolResult{
+			Content: fmt.Sprintf("move error: %v", err),
+			IsError: true,
+		}, nil
+	}
+
+	result := agent.ToolResult{Content: fmt.Sprintf("Moved cursor to (%d, %d)", x, y)}
+	return t.captureAfterAction(result), nil
 }

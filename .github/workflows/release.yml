@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,6 +19,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Build ax_server universal binary
+        run: |
+          cd internal/tools/axserver
+          swift build -c release --arch arm64 --arch x86_64
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp .build/apple/Products/Release/ax_server "$GITHUB_WORKSPACE/dist/ax_server"
 
       - uses: goreleaser/goreleaser-action@v6
         with:
@@ -42,8 +49,6 @@ jobs:
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # GITHUB_REF_NAME is a runner-provided env var (the pushed tag, e.g. v0.2.5).
-          # It is not user-controlled input — only repo maintainers can push versioned tags.
           TAG_NAME: ${{ github.ref_name }}
         run: |
           VERSION="${TAG_NAME#v}"
