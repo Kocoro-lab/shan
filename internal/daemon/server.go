@@ -583,16 +583,12 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "skill entry cannot be null")
 			return
 		}
-		if err := agents.ValidateCommandName(skill.Name); err != nil {
+		if err := skills.ValidateSkillName(skill.Name); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if skill.Type != skills.SkillTypePrompt {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported skill type %q", skill.Type))
-			return
-		}
-		if skill.Prompt == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("skill %q requires a prompt", skill.Name))
+		if skill.Description == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("skill %q requires a description", skill.Name))
 			return
 		}
 	}
@@ -793,7 +789,7 @@ func (s *Server) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	if !s.agentExists(w, agentName) {
 		return
 	}
-	if err := agents.ValidateCommandName(skillName); err != nil {
+	if err := skills.ValidateSkillName(skillName); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -802,12 +798,8 @@ func (s *Server) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	skill.Name = skillName // URL takes precedence
-	if skill.Type != skills.SkillTypePrompt {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unsupported skill type %q", skill.Type))
-		return
-	}
-	if skill.Prompt == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required for prompt-type skills")
+	if skill.Description == "" {
+		writeError(w, http.StatusBadRequest, "description is required")
 		return
 	}
 	if err := agents.WriteAgentSkill(s.deps.AgentsDir, agentName, &skill); err != nil {

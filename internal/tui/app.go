@@ -29,7 +29,6 @@ import (
 	"github.com/Kocoro-lab/shan/internal/hooks"
 	"github.com/Kocoro-lab/shan/internal/instructions"
 	"github.com/Kocoro-lab/shan/internal/session"
-	"github.com/Kocoro-lab/shan/internal/skills"
 	"github.com/Kocoro-lab/shan/internal/tools"
 	"github.com/Kocoro-lab/shan/internal/update"
 )
@@ -332,7 +331,7 @@ func New(cfg *config.Config, version string, agentOverride *agents.Agent) *Model
 			})
 		}
 		for _, s := range agentOverride.Skills {
-			if s.Type == skills.SkillTypePrompt && s.Prompt != "" && !builtinCmds[s.Name] {
+			if s.Prompt != "" && !builtinCmds[s.Name] {
 				customCmds[s.Name] = s.Prompt
 				instanceCmds = append(instanceCmds, slashCmd{
 					cmd:  "/" + s.Name,

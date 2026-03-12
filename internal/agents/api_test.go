@@ -31,7 +31,7 @@ func TestAgentToAPI_Full(t *testing.T) {
 			Tools: &AgentToolsFilter{Allow: []string{"bash"}},
 		},
 		Commands: map[string]string{"review": "do review"},
-		Skills:   []*skills.Skill{{Name: "check", Type: skills.SkillTypePrompt, Prompt: "check it"}},
+		Skills:   []*skills.Skill{{Name: "check", Description: "check things", Prompt: "check it"}},
 	}
 	api := a.ToAPI()
 	if api.Memory == nil || *api.Memory != "some memory" {
@@ -59,7 +59,7 @@ func TestWriteAndLoadAgent(t *testing.T) {
 		t.Fatalf("WriteAgentCommand: %v", err)
 	}
 	if err := WriteAgentSkill(dir, name, &skills.Skill{
-		Name: "check", Type: skills.SkillTypePrompt, Prompt: "check things",
+		Name: "check", Description: "check things", Prompt: "check things",
 	}); err != nil {
 		t.Fatalf("WriteAgentSkill: %v", err)
 	}

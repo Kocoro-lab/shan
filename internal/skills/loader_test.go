@@ -13,7 +13,6 @@ func TestLoadSkills_Basic(t *testing.T) {
 
 	yaml := `name: review-pr
 description: Review a pull request
-type: prompt
 prompt: |
   Review the PR carefully.
 `
@@ -30,9 +29,6 @@ prompt: |
 	s := skills[0]
 	if s.Name != "review-pr" {
 		t.Errorf("name = %q", s.Name)
-	}
-	if s.Type != SkillTypePrompt {
-		t.Errorf("type = %q", s.Type)
 	}
 	if s.Source != "review-agent" {
 		t.Errorf("source = %q", s.Source)
@@ -56,22 +52,10 @@ func TestLoadSkills_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, "skills")
 	os.MkdirAll(skillsDir, 0700)
-	os.WriteFile(filepath.Join(skillsDir, "bad.yaml"), []byte("type: prompt\n"), 0600)
+	os.WriteFile(filepath.Join(skillsDir, "bad.yaml"), []byte("description: no name\n"), 0600)
 
 	_, err := LoadSkills(dir, "test")
 	if err == nil {
 		t.Error("expected error for missing skill name")
-	}
-}
-
-func TestLoadSkills_UnsupportedType(t *testing.T) {
-	dir := t.TempDir()
-	skillsDir := filepath.Join(dir, "skills")
-	os.MkdirAll(skillsDir, 0700)
-	os.WriteFile(filepath.Join(skillsDir, "bad.yaml"), []byte("name: test\ntype: tool_chain\n"), 0600)
-
-	_, err := LoadSkills(dir, "test")
-	if err == nil {
-		t.Error("expected error for unsupported skill type")
 	}
 }

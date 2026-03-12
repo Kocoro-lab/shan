@@ -203,14 +203,11 @@ func (r *AgentCreateRequest) Validate() error {
 		if s == nil {
 			return fmt.Errorf("skill entry cannot be null")
 		}
-		if err := ValidateCommandName(s.Name); err != nil {
+		if err := skills.ValidateSkillName(s.Name); err != nil {
 			return err
 		}
-		if s.Type != skills.SkillTypePrompt {
-			return fmt.Errorf("unsupported skill type %q", s.Type)
-		}
-		if s.Prompt == "" {
-			return fmt.Errorf("skill %q requires a prompt", s.Name)
+		if s.Description == "" {
+			return fmt.Errorf("skill %q requires a description", s.Name)
 		}
 	}
 	return nil
