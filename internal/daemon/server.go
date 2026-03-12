@@ -31,6 +31,7 @@ type Server struct {
 	version        string
 	cancel         context.CancelFunc
 	approvalBroker *ApprovalBroker
+	eventBus       *EventBus
 }
 
 func NewServer(port int, client *Client, deps *ServerDeps, version string) *Server {
@@ -40,6 +41,7 @@ func NewServer(port int, client *Client, deps *ServerDeps, version string) *Serv
 		deps:           deps,
 		version:        version,
 		approvalBroker: NewApprovalBroker(func(req ApprovalRequest) error { return nil }),
+		eventBus:       NewEventBus(),
 	}
 }
 
@@ -80,6 +82,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /sessions/search", s.handleSessionSearch)
 	mux.HandleFunc("POST /approval", s.handleApproval)
 	mux.HandleFunc("POST /message", s.handleMessage)
+	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
@@ -129,6 +132,43 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 	s.approvalBroker.Resolve(req.RequestID, req.Decision)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"ok":true}`))
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ch := s.eventBus.Subscribe()
+	defer s.eventBus.Unsubscribe(ch)
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case evt := <-ch:
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, string(evt.Payload))
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+// EventBus returns the server's EventBus for emitting events.
+func (s *Server) EventBus() *EventBus {
+	return s.eventBus
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

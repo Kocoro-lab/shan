@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -562,5 +564,52 @@ func TestServer_BodySizeLimit(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Logf("status = %d (acceptable if 400, ideal is 413)", resp.StatusCode)
+	}
+}
+
+func TestEventsSSEEndpoint(t *testing.T) {
+	bus := NewEventBus()
+	s := &Server{eventBus: bus}
+
+	handler := http.HandlerFunc(s.handleEvents)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %s", resp.Header.Get("Content-Type"))
+	}
+
+	// Wait for SSE handler to subscribe before emitting
+	time.Sleep(50 * time.Millisecond)
+
+	bus.Emit(Event{
+		Type:    EventAgentReply,
+		Payload: json.RawMessage(`{"agent":"test","text":"hello"}`),
+	})
+
+	scanner := bufio.NewScanner(resp.Body)
+	var eventLine, dataLine string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event:") {
+			eventLine = line
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLine = line
+			break
+		}
+	}
+
+	if eventLine != "event: agent_reply" {
+		t.Fatalf("expected 'event: agent_reply', got %q", eventLine)
+	}
+	if !strings.Contains(dataLine, `"agent":"test"`) {
+		t.Fatalf("expected agent in data, got %q", dataLine)
 	}
 }
