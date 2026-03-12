@@ -23,17 +23,24 @@ import (
 )
 
 type Server struct {
-	port     int
-	client   *Client
-	deps     *ServerDeps
-	server   *http.Server
-	listener net.Listener
-	version  string
-	cancel   context.CancelFunc
+	port           int
+	client         *Client
+	deps           *ServerDeps
+	server         *http.Server
+	listener       net.Listener
+	version        string
+	cancel         context.CancelFunc
+	approvalBroker *ApprovalBroker
 }
 
 func NewServer(port int, client *Client, deps *ServerDeps, version string) *Server {
-	return &Server{port: port, client: client, deps: deps, version: version}
+	return &Server{
+		port:           port,
+		client:         client,
+		deps:           deps,
+		version:        version,
+		approvalBroker: NewApprovalBroker(func(req ApprovalRequest) error { return nil }),
+	}
 }
 
 func (s *Server) Port() int {
@@ -71,6 +78,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /sessions", s.handleSessions)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("GET /sessions/search", s.handleSessionSearch)
+	mux.HandleFunc("POST /approval", s.handleApproval)
 	mux.HandleFunc("POST /message", s.handleMessage)
 	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 
@@ -101,6 +109,26 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		log.Println("daemon: shutdown requested via /shutdown")
 		go s.cancel()
 	}
+}
+
+func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
+	var req ApprovalResponse
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.RequestID == "" {
+		http.Error(w, `{"error":"request_id required"}`, http.StatusBadRequest)
+		return
+	}
+	switch req.Decision {
+	case DecisionAllow, DecisionDeny, DecisionAlwaysAllow:
+	default:
+		http.Error(w, `{"error":"decision must be allow, deny, or always_allow"}`, http.StatusBadRequest)
+		return
+	}
+	s.approvalBroker.Resolve(req.RequestID, req.Decision)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +333,23 @@ func (s *Server) handleMessageSSE(w http.ResponseWriter, r *http.Request, req Ru
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	handler := &sseEventHandler{w: w, flusher: flusher}
+	// Set the broker's sendFn to emit SSE approval events for this request.
+	// NOTE: This overwrites the sendFn for all SSE requests. The local daemon
+	// only processes one SSE request at a time, so this is acceptable. If
+	// concurrent SSE support is needed, each request needs its own broker.
+	s.approvalBroker.mu.Lock()
+	s.approvalBroker.sendFn = func(areq ApprovalRequest) error {
+		data := mustJSON(areq)
+		_, err := fmt.Fprintf(w, "event: approval\ndata: %s\n\n", data)
+		flusher.Flush()
+		return err
+	}
+	s.approvalBroker.mu.Unlock()
+
+	// Cancel all pending approvals when the SSE stream ends (client disconnect, normal completion, or error)
+	defer s.approvalBroker.CancelAll()
+
+	handler := &sseEventHandler{w: w, flusher: flusher, broker: s.approvalBroker, ctx: r.Context()}
 	result, err := RunAgent(r.Context(), s.deps, req, handler)
 	if err != nil {
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", mustJSON(map[string]string{"error": err.Error()}))
@@ -340,6 +384,8 @@ func (h *httpEventHandler) OnApprovalNeeded(tool string, args string) bool {
 type sseEventHandler struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
+	broker  *ApprovalBroker
+	ctx     context.Context
 }
 
 func (h *sseEventHandler) OnToolCall(name string, args string) {
@@ -368,12 +414,14 @@ func (h *sseEventHandler) OnStreamDelta(delta string) {
 
 func (h *sseEventHandler) OnUsage(usage agent.TurnUsage) {}
 
-// OnApprovalNeeded auto-approves for local HTTP API calls.
-// Threat model: localhost-only, unauthenticated but local-trusted.
-// Permission engine (hard-blocks, denied_commands) runs before this.
-// If daemon ever listens on non-localhost, this MUST require auth.
+// OnApprovalNeeded sends an approval request over SSE and blocks until the
+// client responds via POST /approval or the request context is cancelled.
 func (h *sseEventHandler) OnApprovalNeeded(tool string, args string) bool {
-	return true
+	decision := h.broker.Request(h.ctx, "", "", "", tool, args)
+	if decision == DecisionAlwaysAllow {
+		h.broker.SetToolAutoApprove(tool)
+	}
+	return decision == DecisionAllow || decision == DecisionAlwaysAllow
 }
 
 // mustJSON marshals v to JSON, returning "{}" on error.
