@@ -126,6 +126,62 @@ func TestLoadSkills_NonexistentDir(t *testing.T) {
 	}
 }
 
+func TestLoadSkills_Integration(t *testing.T) {
+	agentDir := t.TempDir()
+	globalDir := t.TempDir()
+
+	// Agent skill shadows global
+	createSkillDir(t, agentDir, "pdf", "---\nname: pdf\ndescription: Agent PDF\n---\n# Agent PDF Guide")
+	// Global skills
+	createSkillDir(t, globalDir, "pdf", "---\nname: pdf\ndescription: Global PDF\n---\n# Global PDF Guide")
+	createSkillDir(t, globalDir, "xlsx", "---\nname: xlsx\ndescription: Spreadsheet processing\n---\n# XLSX Guide")
+
+	loaded, err := LoadSkills(
+		SkillSource{Dir: agentDir, Source: "agent:test"},
+		SkillSource{Dir: globalDir, Source: "global"},
+	)
+	if err != nil {
+		t.Fatalf("load error: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 skills (deduped), got %d", len(loaded))
+	}
+
+	var pdf, xlsx *Skill
+	for _, s := range loaded {
+		switch s.Name {
+		case "pdf":
+			pdf = s
+		case "xlsx":
+			xlsx = s
+		}
+	}
+
+	// Agent pdf shadows global
+	if pdf == nil {
+		t.Fatal("pdf not found")
+	}
+	if pdf.Source != "agent:test" {
+		t.Errorf("pdf source = %q, want agent:test", pdf.Source)
+	}
+	if !strings.Contains(pdf.Prompt, "Agent PDF Guide") {
+		t.Error("agent pdf should shadow global")
+	}
+
+	// Global xlsx loaded
+	if xlsx == nil {
+		t.Fatal("xlsx not found")
+	}
+	if xlsx.Source != "global" {
+		t.Errorf("xlsx source = %q, want global", xlsx.Source)
+	}
+
+	// Sorted order
+	if loaded[0].Name != "pdf" || loaded[1].Name != "xlsx" {
+		t.Errorf("expected [pdf, xlsx], got [%s, %s]", loaded[0].Name, loaded[1].Name)
+	}
+}
+
 func TestLoadSkills_Sorted(t *testing.T) {
 	tmp := t.TempDir()
 	createSkillDir(t, tmp, "zebra", "---\nname: zebra\ndescription: Z\n---\nZ")
