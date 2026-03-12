@@ -109,11 +109,13 @@ func LoadAgent(agentsDir, name string) (*Agent, error) {
 	// Load agent-scoped commands (optional)
 	ag.Commands = loadAgentCommands(filepath.Join(dir, "commands"))
 
-	// Load agent-scoped skills (optional)
-	loadedSkills, err := skills.LoadSkills(skills.SkillSource{
-		Dir:    filepath.Join(dir, "skills"),
-		Source: "agent:" + name,
-	})
+	// Load agent-scoped skills + global skills (agent takes priority via seen map)
+	agentSkillsDir := filepath.Join(dir, "skills")
+	globalSkillsDir := filepath.Join(filepath.Dir(agentsDir), "skills")
+	loadedSkills, err := skills.LoadSkills(
+		skills.SkillSource{Dir: agentSkillsDir, Source: "agent:" + name},
+		skills.SkillSource{Dir: globalSkillsDir, Source: "global"},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("agent %q: bad skills: %w", name, err)
 	}
@@ -180,6 +182,12 @@ func loadAgentCommands(dir string) map[string]string {
 		commands[name] = content
 	}
 	return commands
+}
+
+// LoadGlobalSkills loads skills from the global skills directory (~/.shannon/skills/).
+func LoadGlobalSkills(shannonDir string) ([]*skills.Skill, error) {
+	globalSkillsDir := filepath.Join(shannonDir, "skills")
+	return skills.LoadSkills(skills.SkillSource{Dir: globalSkillsDir, Source: "global"})
 }
 
 func ListAgents(agentsDir string) ([]string, error) {
