@@ -18,7 +18,7 @@ type AgentAPI struct {
 	Memory   *string           `json:"memory"`   // null if no MEMORY.md
 	Config   *AgentConfigAPI   `json:"config"`    // null if no config.yaml
 	Commands map[string]string `json:"commands"`  // null if no commands
-	Skills   []*skills.Skill   `json:"skills"`    // null if no skills
+	Skills   []skills.SkillMeta `json:"skills"`    // null if no skills
 }
 
 // AgentConfigAPI is the JSON representation of agent config.
@@ -60,7 +60,11 @@ func (a *Agent) ToAPI() *AgentAPI {
 		api.Commands = a.Commands
 	}
 	if len(a.Skills) > 0 {
-		api.Skills = a.Skills
+		metas := make([]skills.SkillMeta, len(a.Skills))
+		for i, s := range a.Skills {
+			metas[i] = s.ToMeta()
+		}
+		api.Skills = metas
 	}
 	return api
 }

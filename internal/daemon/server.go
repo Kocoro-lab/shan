@@ -146,7 +146,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		_, memErr := os.Stat(filepath.Join(dir, "MEMORY.md"))
 		_, cfgErr := os.Stat(filepath.Join(dir, "config.yaml"))
 		cmdFiles, _ := filepath.Glob(filepath.Join(dir, "commands", "*.md"))
-		skillFiles, _ := filepath.Glob(filepath.Join(dir, "skills", "*.yaml"))
+		skillFiles, _ := filepath.Glob(filepath.Join(dir, "skills", "*", "SKILL.md"))
 		result = append(result, agentInfo{
 			Name:         name,
 			HasMemory:    memErr == nil,
@@ -819,7 +819,7 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	if !s.agentExists(w, agentName) {
 		return
 	}
-	if err := agents.ValidateCommandName(skillName); err != nil {
+	if err := skills.ValidateSkillName(skillName); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
