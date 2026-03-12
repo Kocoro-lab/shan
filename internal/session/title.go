@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // AgentTitle returns a fixed title for a named agent's long-lived session.
@@ -22,13 +23,14 @@ func Title(input string) string {
 	if input == "" {
 		return "New session"
 	}
-	const maxLen = 50
-	if len(input) <= maxLen {
+	const maxRunes = 50
+	if utf8.RuneCountInString(input) <= maxRunes {
 		return input
 	}
-	// Truncate at word boundary
-	truncated := input[:maxLen]
-	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > maxLen/2 {
+	// Truncate at rune boundary
+	runes := []rune(input)
+	truncated := string(runes[:maxRunes])
+	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > len(truncated)/2 {
 		truncated = truncated[:lastSpace]
 	}
 	return truncated + "..."
