@@ -41,6 +41,18 @@ var daemonStartCmd = &cobra.Command{
 
 		shanDir := config.ShannonDir()
 		agentsDir := filepath.Join(shanDir, "agents")
+		pidPath := filepath.Join(shanDir, "daemon.pid")
+
+		force, _ := cmd.Flags().GetBool("force")
+		if force {
+			stopExistingDaemon(pidPath)
+		}
+
+		pidFile, err := daemon.AcquirePIDFile(pidPath)
+		if err != nil {
+			return err
+		}
+		defer pidFile.Close()
 
 		gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
 		reg, skillsPtr, cleanup, serverErr := tools.RegisterAll(gw, cfg)
@@ -177,7 +189,7 @@ var daemonStartCmd = &cobra.Command{
 		time.Sleep(50 * time.Millisecond)
 		select {
 		case err := <-serverErrCh:
-			log.Printf("daemon: local server failed to start: %v (continuing without it)", err)
+			return fmt.Errorf("daemon: local server failed to start: %w", err)
 		default:
 			log.Printf("daemon: local server listening on http://127.0.0.1:7533")
 		}
@@ -193,17 +205,67 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the background daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		pidPath := filepath.Join(config.ShannonDir(), "daemon.pid")
+
+		// Try graceful HTTP shutdown first.
 		resp, err := http.Post("http://127.0.0.1:7533/shutdown", "application/json", nil)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("unexpected response: %s", resp.Status)
+			}
+			// Wait for process to fully exit (PID file lock released).
+			deadline := time.After(5 * time.Second)
+			ticker := time.NewTicker(200 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-deadline:
+					fmt.Println("Daemon shutdown requested (still exiting).")
+					return nil
+				case <-ticker.C:
+					if _, locked := daemon.IsLocked(pidPath); !locked {
+						fmt.Println("Daemon stopped.")
+						return nil
+					}
+				}
+			}
+		}
+
+		// HTTP failed — fall back to SIGTERM via PID file.
+		pid, locked := daemon.IsLocked(pidPath)
+		if !locked {
+			return fmt.Errorf("daemon not running")
+		}
+		if pid <= 0 {
+			return fmt.Errorf("daemon PID file is locked but contains invalid PID")
+		}
+
+		proc, err := os.FindProcess(pid)
 		if err != nil {
-			return fmt.Errorf("daemon not running or not reachable: %w", err)
+			return fmt.Errorf("cannot find daemon process %d: %w", pid, err)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			fmt.Println("Daemon stopped.")
-		} else {
-			return fmt.Errorf("unexpected response: %s", resp.Status)
+		if err := proc.Signal(syscall.SIGTERM); err != nil {
+			return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
 		}
-		return nil
+		fmt.Printf("Sent SIGTERM to daemon (PID %d).\n", pid)
+
+		// Wait for process to exit (up to 5s).
+		deadline := time.After(5 * time.Second)
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-deadline:
+				fmt.Printf("Warning: daemon (PID %d) did not exit within 5s.\n", pid)
+				return nil
+			case <-ticker.C:
+				if _, locked := daemon.IsLocked(pidPath); !locked {
+					fmt.Println("Daemon stopped.")
+					return nil
+				}
+			}
+		}
 	},
 }
 
@@ -211,8 +273,16 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		pidPath := filepath.Join(config.ShannonDir(), "daemon.pid")
+
 		resp, err := http.Get("http://127.0.0.1:7533/status")
 		if err != nil {
+			// HTTP failed — check PID file to distinguish "not running" from "running but no HTTP server".
+			if pid, locked := daemon.IsLocked(pidPath); locked {
+				fmt.Printf("Status:    running (HTTP server unavailable)\n")
+				fmt.Printf("PID:       %d\n", pid)
+				return nil
+			}
 			fmt.Println("Daemon is not running.")
 			return nil
 		}
@@ -228,7 +298,11 @@ var daemonStatusCmd = &cobra.Command{
 			return fmt.Errorf("failed to parse status: %w", err)
 		}
 
+		pid, _ := daemon.ReadPID(pidPath)
 		fmt.Printf("Status:    running\n")
+		if pid > 0 {
+			fmt.Printf("PID:       %d\n", pid)
+		}
 		if status.Version != "" {
 			fmt.Printf("Version:   %s\n", status.Version)
 		}
@@ -302,7 +376,42 @@ func containsString(slice []string, s string) bool {
 	return false
 }
 
+func stopExistingDaemon(pidPath string) {
+	// Try graceful HTTP shutdown.
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post("http://127.0.0.1:7533/shutdown", "application/json", nil)
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	// If HTTP failed, try SIGTERM via PID file.
+	if err != nil {
+		if pid, locked := daemon.IsLocked(pidPath); locked && pid > 0 {
+			if proc, err := os.FindProcess(pid); err == nil {
+				proc.Signal(syscall.SIGTERM)
+			}
+		}
+	}
+
+	// Wait for lock to be released (up to 3s).
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			log.Printf("daemon: existing daemon did not stop within 3s, proceeding anyway")
+			return
+		case <-ticker.C:
+			if _, locked := daemon.IsLocked(pidPath); !locked {
+				return
+			}
+		}
+	}
+}
+
 func init() {
+	daemonStartCmd.Flags().Bool("force", false, "Stop any existing daemon before starting")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
