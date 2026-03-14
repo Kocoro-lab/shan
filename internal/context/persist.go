@@ -101,36 +101,50 @@ func PersistLearnings(ctx context.Context, c Completer, messages []client.Messag
 		return nil
 	}
 
-	// Ensure directory exists
+	// Wrap with header so auto-persisted entries are distinguishable
+	timestamp := time.Now().Format("2006-01-02 15:04")
+	entry := fmt.Sprintf("\n## Auto-persisted (%s)\n\n%s", timestamp, result)
+	return BoundedAppend(memoryDir, entry)
+}
+
+// MaxMemoryLines is the maximum number of lines in MEMORY.md before overflow
+// to a detail file. Exported so callers (memory_append tool) share the constant.
+const MaxMemoryLines = maxMemoryLines
+
+// BoundedAppend appends content to MEMORY.md in memoryDir, respecting the
+// line limit. If appending would exceed maxMemoryLines, content is written
+// to a timestamped detail file and a one-line pointer is added to MEMORY.md.
+// All writes are flock-protected. Both PersistLearnings and memory_append
+// use this function to ensure consistent bounded-append behavior.
+func BoundedAppend(memoryDir, content string) error {
 	if err := os.MkdirAll(memoryDir, 0755); err != nil {
 		return fmt.Errorf("create memory dir: %w", err)
 	}
 
-	// Count existing lines
-	existingLines := countLines(existingMemory)
+	memoryPath := filepath.Join(memoryDir, "MEMORY.md")
+	existing, _ := os.ReadFile(memoryPath)
 
-	// Count new lines to add
-	newLines := strings.Count(result, "\n") + 1
+	existingLines := countLines(existing)
+	newLines := strings.Count(content, "\n") + 1
 
 	// If appending would exceed the limit, write overflow to a detail file
-	// and add a one-line pointer in MEMORY.md instead
-	// +3 accounts for "## Auto-persisted (date)" header + surrounding blank lines
-	if existingLines+newLines+3 > maxMemoryLines {
-		detailFile, err := writeDetailFile(memoryDir, result)
+	// and add a one-line pointer in MEMORY.md instead.
+	if existingLines+newLines > maxMemoryLines {
+		detailFile, err := writeDetailFile(memoryDir, content)
 		if err != nil {
 			return fmt.Errorf("write detail file: %w", err)
 		}
-		// Add a one-line pointer instead of full content
 		timestamp := time.Now().Format("2006-01-02")
-		entry := fmt.Sprintf("\n- [%s] See [%s](%s) for auto-persisted learnings\n",
+		entry := fmt.Sprintf("\n- [%s] See [%s](%s) for details\n",
 			timestamp, detailFile, detailFile)
 		return appendToFile(memoryPath, entry)
 	}
 
-	// Append directly to MEMORY.md
-	timestamp := time.Now().Format("2006-01-02 15:04")
-	entry := fmt.Sprintf("\n\n## Auto-persisted (%s)\n\n%s\n", timestamp, result)
-	return appendToFile(memoryPath, entry)
+	// Ensure content starts on a new line
+	if len(existing) > 0 && !strings.HasPrefix(content, "\n") {
+		content = "\n" + content
+	}
+	return appendToFile(memoryPath, content)
 }
 
 // writeDetailFile creates a timestamped detail file in memoryDir and returns
