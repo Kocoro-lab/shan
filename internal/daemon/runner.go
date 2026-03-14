@@ -167,6 +167,14 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 		}
 	}
 	sess := sessMgr.Current()
+
+	// Persist session to disk before loop.Run() so there's a record even if
+	// the daemon crashes mid-execution. The final save after completion is
+	// still needed to capture the assistant's reply.
+	if err := sessMgr.Save(); err != nil {
+		log.Printf("daemon: failed to pre-save session: %v", err)
+	}
+
 	history := sess.Messages
 
 	// Clone and apply per-agent tool filter
