@@ -122,10 +122,12 @@ var daemonStartCmd = &cobra.Command{
 				source = msg.Channel
 			}
 			req := daemon.RunAgentRequest{
-				Text:   msg.Text,
-				Agent:  msg.AgentName,
-				Source: source,
-				Sender: msg.Sender,
+				Text:     msg.Text,
+				Agent:    msg.AgentName,
+				Source:   source,
+				Channel:  msg.Channel,
+				ThreadID: msg.ThreadID,
+				Sender:   msg.Sender,
 			}
 			// Fall back to @mention parsing if cloud didn't set agent name.
 			if req.Agent == "" {
@@ -135,6 +137,22 @@ var daemonStartCmd = &cobra.Command{
 			}
 			if req.Text == "" {
 				req.Text = msg.Text
+			}
+			req.EnsureRouteKey()
+
+			// Try injecting into an active run on the same route.
+			if req.RouteKey != "" {
+				switch deps.SessionCache.InjectMessage(req.RouteKey, req.Text) {
+				case daemon.InjectOK:
+					// Message injected — running loop will incorporate it.
+					return ""
+				case daemon.InjectQueueFull:
+					// Active run exists but queue saturated — don't start a new run.
+					log.Printf("daemon: inject queue full for route %q, message dropped", req.RouteKey)
+					return ""
+				case daemon.InjectNoActiveRun:
+					// Fall through to start a new RunAgent
+				}
 			}
 
 			// Resolve auto_approve: per-agent overrides global

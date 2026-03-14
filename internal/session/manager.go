@@ -5,10 +5,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
+// Manager provides session lifecycle operations. It is safe for concurrent use
+// across multiple route entries that share the same sessions directory.
 type Manager struct {
+	mu      sync.Mutex
 	store   *Store
 	current *Session
 }
@@ -20,6 +24,8 @@ func NewManager(sessionsDir string) *Manager {
 }
 
 func (m *Manager) NewSession() *Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	id := generateID()
 	m.current = &Session{
 		ID:        id,
@@ -31,10 +37,14 @@ func (m *Manager) NewSession() *Session {
 }
 
 func (m *Manager) Current() *Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.current
 }
 
 func (m *Manager) Resume(id string) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	sess, err := m.store.Load(id)
 	if err != nil {
 		return nil, err
@@ -44,6 +54,8 @@ func (m *Manager) Resume(id string) (*Session, error) {
 }
 
 func (m *Manager) Save() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.current == nil {
 		return nil
 	}

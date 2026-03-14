@@ -1,120 +1,257 @@
 package daemon
 
 import (
+	"context"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Kocoro-lab/shan/internal/session"
 )
 
-type agentEntry struct {
-	mgr *session.Manager
-	mu  sync.Mutex // guards session read/append/save for this agent
+type routeEntry struct {
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	done       chan struct{}
+	sessionID  string
+	lastAccess time.Time
+	injectCh   chan string // buffered channel for mid-run message injection
+	manager    *session.Manager
 }
 
-// SessionCache manages one session.Manager per agent.
-// For daemon mode, each agent has a single long-lived session that is
-// always resumed. The cache is keyed by agent name ("" = default agent).
-// Per-agent mutexes serialize concurrent messages to the same agent.
+// SessionCache separates route-level locking from session storage.
+// - routes: one lock/cancel/inflight channel per routing key
+// - managers: one shared session.Manager per sessions directory for non-routed usage
+// - route manager: lazily created session.Manager per route for routed runs
 type SessionCache struct {
 	mu         sync.Mutex
-	agents     map[string]*agentEntry
+	routes     map[string]*routeEntry
+	managers   map[string]*session.Manager
 	shannonDir string
 }
 
 // NewSessionCache creates a cache rooted at the given shannon directory.
 func NewSessionCache(shannonDir string) *SessionCache {
 	return &SessionCache{
-		agents:     make(map[string]*agentEntry),
+		routes:     make(map[string]*routeEntry),
+		managers:   make(map[string]*session.Manager),
 		shannonDir: shannonDir,
 	}
 }
 
-// GetOrCreate returns the session.Manager for the given agent, creating one
-// if needed. For daemon mode, it auto-resumes the latest session or creates
-// a new one if none exists.
+// GetOrCreate returns the session.Manager for the given agent, preserving
+// compatibility with existing caller paths.
 func (sc *SessionCache) GetOrCreate(agent string) *session.Manager {
-	entry := sc.getEntry(agent)
-	return entry.mgr
+	return sc.GetOrCreateManager(sc.sessionsDir(agent))
 }
 
-// Lock acquires the per-agent mutex. The caller MUST call Unlock when done.
-// Use this to serialize concurrent messages to the same agent:
-//
-//	mgr := cache.GetOrCreate(agent)
-//	cache.Lock(agent)
-//	defer cache.Unlock(agent)
-//	// ... read history, run agent, append, save ...
-func (sc *SessionCache) Lock(agent string) {
-	sc.getEntry(agent).mu.Lock()
-}
-
-// Unlock releases the per-agent mutex.
-func (sc *SessionCache) Unlock(agent string) {
-	sc.getEntry(agent).mu.Unlock()
-}
-
-func (sc *SessionCache) getEntry(agent string) *agentEntry {
+// GetOrCreateManager returns the shared session.Manager for a sessions directory.
+// Multiple routes that map to the same directory reuse the same manager.
+func (sc *SessionCache) GetOrCreateManager(sessionsDir string) *session.Manager {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
-	if entry, ok := sc.agents[agent]; ok {
-		if entry.mgr != nil {
-			return entry
-		}
-		// Manager was evicted — create a fresh one on the same entry.
-		entry.mgr = sc.newManager(agent)
-		return entry
+	if mgr, ok := sc.managers[sessionsDir]; ok && mgr != nil {
+		return mgr
 	}
 
-	entry := &agentEntry{mgr: sc.newManager(agent)}
-	sc.agents[agent] = entry
-	return entry
-}
-
-func (sc *SessionCache) newManager(agent string) *session.Manager {
-	sessDir := sc.sessionsDir(agent)
-	mgr := session.NewManager(sessDir)
-
-	sess, err := mgr.ResumeLatest()
-	if err != nil {
-		log.Printf("daemon: failed to resume session for agent %q: %v (starting fresh)", agent, err)
-	}
-	if sess == nil {
-		mgr.NewSession()
-	}
+	mgr := sc.newManager(sessionsDir)
+	sc.managers[sessionsDir] = mgr
 	return mgr
 }
 
-// Evict closes the session manager for the given agent, keeping the entry
-// in the map so the per-agent mutex remains stable. The next GetOrCreate call
-// will lazily create a fresh manager. The caller must hold the agent's lock.
+// Lock acquires the route lock for a named agent.
+// kept for compatibility with existing caller paths.
+func (sc *SessionCache) Lock(agent string) {
+	sc.LockRouteWithManager(sc.agentRouteKey(agent), sc.sessionsDir(agent))
+}
+
+// Unlock releases the route lock for a named agent.
+// kept for compatibility with existing caller paths.
+func (sc *SessionCache) Unlock(agent string) {
+	sc.UnlockRoute(sc.agentRouteKey(agent))
+}
+
+// LockRoute acquires the per-route mutex.
+// If another run is in-flight for this route, it is canceled and waited for
+// before this call returns.
+func (sc *SessionCache) LockRoute(key string) *routeEntry {
+	// Preserve the compatibility behavior for non-routed callers.
+	// The route manager is not created here because the caller may not know
+	// the sessions directory.
+	return sc.LockRouteWithManager(key, "")
+}
+
+func (sc *SessionCache) LockRouteWithManager(key, sessionsDir string) *routeEntry {
+	if key == "" {
+		return nil
+	}
+	sc.mu.Lock()
+	entry, ok := sc.routes[key]
+	if !ok {
+		entry = &routeEntry{
+			lastAccess: time.Now(),
+		}
+		sc.routes[key] = entry
+	}
+	if entry.manager == nil && sessionsDir != "" {
+		entry.manager = sc.newManager(sessionsDir)
+	}
+	cancel := entry.cancel
+	done := entry.done
+	sc.mu.Unlock()
+
+	if cancel != nil && done != nil {
+		cancel()
+		<-done
+	}
+
+	entry.mu.Lock()
+	entry.lastAccess = time.Now()
+	return entry
+}
+
+// UnlockRoute releases the per-route mutex acquired by LockRoute.
+func (sc *SessionCache) UnlockRoute(key string) {
+	sc.mu.Lock()
+	entry, ok := sc.routes[key]
+	sc.mu.Unlock()
+	if !ok || entry == nil {
+		return
+	}
+	entry.cancel = nil
+	entry.lastAccess = time.Now()
+	entry.mu.Unlock()
+}
+
+// SetRouteSessionID stores the current route session id for future resume.
+func (sc *SessionCache) SetRouteSessionID(key, sessionID string) {
+	sc.mu.Lock()
+	entry := sc.routes[key]
+	sc.mu.Unlock()
+	if entry == nil {
+		return
+	}
+	entry.mu.Lock()
+	entry.sessionID = sessionID
+	entry.mu.Unlock()
+}
+
+// RouteSessionID returns the session id tracked by this route.
+func (sc *SessionCache) RouteSessionID(key string) string {
+	sc.mu.Lock()
+	entry := sc.routes[key]
+	sc.mu.Unlock()
+	if entry == nil {
+		return ""
+	}
+	entry.mu.Lock()
+	sessionID := entry.sessionID
+	entry.mu.Unlock()
+	return sessionID
+}
+
+// InjectResult describes the outcome of an InjectMessage call.
+type InjectResult int
+
+const (
+	InjectNoActiveRun InjectResult = iota // no in-flight run; caller should start one
+	InjectOK                              // message delivered to the running loop
+	InjectQueueFull                       // active run exists but queue is saturated
+)
+
+// InjectMessage sends a message into a running agent loop for this route.
+// Returns InjectOK on success, InjectNoActiveRun if no run is in-flight
+// (caller should start a new run), or InjectQueueFull if the channel is
+// saturated (caller should NOT start a new run — the active run still owns
+// this route).
+func (sc *SessionCache) InjectMessage(key, text string) InjectResult {
+	if key == "" {
+		return InjectNoActiveRun
+	}
+	sc.mu.Lock()
+	entry, ok := sc.routes[key]
+	sc.mu.Unlock()
+	if !ok || entry == nil {
+		return InjectNoActiveRun
+	}
+	entry.mu.Lock()
+	ch := entry.injectCh
+	done := entry.done
+	entry.mu.Unlock()
+	if ch == nil || done == nil {
+		return InjectNoActiveRun
+	}
+	select {
+	case ch <- text:
+		return InjectOK
+	default:
+		return InjectQueueFull
+	}
+}
+
+// CancelRoute cancels the in-flight run for a route without waiting.
+// Used by the hard cancel API endpoint.
+func (sc *SessionCache) CancelRoute(key string) {
+	sc.mu.Lock()
+	entry, ok := sc.routes[key]
+	sc.mu.Unlock()
+	if !ok || entry == nil {
+		return
+	}
+	entry.mu.Lock()
+	if entry.cancel != nil {
+		entry.cancel()
+	}
+	entry.mu.Unlock()
+}
+
+// Evict closes and removes the manager for this agent and drops matching route
+// state.
 func (sc *SessionCache) Evict(agent string) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	if entry, ok := sc.agents[agent]; ok {
-		if entry.mgr != nil {
-			if err := entry.mgr.Close(); err != nil {
-				log.Printf("daemon: failed to close session for agent %q: %v", agent, err)
+	sessionsDir := sc.sessionsDir(agent)
+	if mgr, ok := sc.managers[sessionsDir]; ok && mgr != nil {
+		if err := mgr.Close(); err != nil {
+			log.Printf("daemon: failed to close session for agent %q: %v", agent, err)
+		}
+		delete(sc.managers, sessionsDir)
+	}
+
+	prefix := sc.agentRouteKey(agent)
+	for key := range sc.routes {
+		if key == prefix || strings.HasPrefix(key, prefix+":") {
+			if route := sc.routes[key]; route != nil && route.manager != nil {
+				if err := route.manager.Close(); err != nil {
+					log.Printf("daemon: failed to close session for route %q: %v", key, err)
+				}
 			}
-			entry.mgr = nil
+			delete(sc.routes, key)
 		}
 	}
 }
 
-// CloseAll closes all session managers in the cache.
+// CloseAll closes all session managers and clears cache state.
 func (sc *SessionCache) CloseAll() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	for name, entry := range sc.agents {
-		if entry.mgr == nil {
-			continue
-		}
-		if err := entry.mgr.Close(); err != nil {
-			log.Printf("daemon: failed to close session manager for agent %q: %v", name, err)
+	for sessionsDir, mgr := range sc.managers {
+		if err := mgr.Close(); err != nil {
+			log.Printf("daemon: failed to close session for %q: %v", sessionsDir, err)
 		}
 	}
+	for key, route := range sc.routes {
+		if route != nil && route.manager != nil {
+			if err := route.manager.Close(); err != nil {
+				log.Printf("daemon: failed to close session for route %q: %v", key, err)
+			}
+		}
+	}
+	sc.managers = make(map[string]*session.Manager)
+	sc.routes = make(map[string]*routeEntry)
 }
 
 // SessionsDir returns the sessions directory for the given agent.
@@ -128,4 +265,21 @@ func (sc *SessionCache) sessionsDir(agent string) string {
 		return filepath.Join(sc.shannonDir, "sessions")
 	}
 	return filepath.Join(sc.shannonDir, "agents", agent, "sessions")
+}
+
+func (sc *SessionCache) agentRouteKey(agent string) string {
+	return "agent:" + agent
+}
+
+func (sc *SessionCache) newManager(sessionsDir string) *session.Manager {
+	mgr := session.NewManager(sessionsDir)
+
+	sess, err := mgr.ResumeLatest()
+	if err != nil {
+		log.Printf("daemon: failed to resume session for %q: %v (starting fresh)", sessionsDir, err)
+	}
+	if sess == nil {
+		mgr.NewSession()
+	}
+	return mgr
 }

@@ -27,6 +27,8 @@ type Session struct {
 	Messages    []client.Message `json:"messages"`
 	RemoteTasks []string         `json:"remote_tasks,omitempty"`
 	MessageMeta []MessageMeta    `json:"message_meta,omitempty"`
+	Source      string           `json:"source,omitempty"`  // "slack", "line", "ptfrog", "webhook"
+	Channel     string           `json:"channel,omitempty"` // source channel/group identifier
 }
 
 // SourceAt returns the source for message at index i, or "unknown" if not available.

@@ -118,6 +118,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /sessions/search", s.handleSessionSearch)
 	mux.HandleFunc("POST /approval", s.handleApproval)
 	mux.HandleFunc("POST /message", s.handleMessage)
+	mux.HandleFunc("POST /cancel", s.handleCancel)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 
@@ -148,6 +149,34 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		log.Println("daemon: shutdown requested via /shutdown")
 		go s.cancel()
 	}
+}
+
+func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RouteKey  string `json:"route_key,omitempty"`
+		SessionID string `json:"session_id,omitempty"`
+		Agent     string `json:"agent,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	key := req.RouteKey
+	if key == "" && req.SessionID != "" {
+		key = "session:" + sanitizeRouteValue(req.SessionID)
+	}
+	if key == "" && req.Agent != "" {
+		key = "agent:" + sanitizeRouteValue(req.Agent)
+	}
+	if key == "" {
+		http.Error(w, `{"error":"route_key, session_id, or agent required"}`, http.StatusBadRequest)
+		return
+	}
+
+	s.deps.SessionCache.CancelRoute(key)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled", "route": key})
 }
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +330,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	mgr := s.deps.SessionCache.GetOrCreate(agentName)
+	mgr := s.deps.SessionCache.GetOrCreateManager(s.deps.SessionCache.SessionsDir(agentName))
 	summaries, err := mgr.List()
 	if err != nil {
 		// If the directory doesn't exist, return empty list.
@@ -344,7 +373,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	mgr := s.deps.SessionCache.GetOrCreate(agentName)
+	mgr := s.deps.SessionCache.GetOrCreateManager(s.deps.SessionCache.SessionsDir(agentName))
 	if err := mgr.Delete(id); err != nil {
 		if os.IsNotExist(err) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("session %q not found", id))
@@ -376,7 +405,7 @@ func (s *Server) handleSessionSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mgr := s.deps.SessionCache.GetOrCreate(agentName)
+	mgr := s.deps.SessionCache.GetOrCreateManager(s.deps.SessionCache.SessionsDir(agentName))
 	results, err := mgr.Search(query, 20)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
@@ -402,9 +431,44 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if req.Source == "" {
 		req.Source = "ptfrog"
 	}
+	req.EnsureRouteKey()
 	if err := req.Validate(); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 		return
+	}
+
+	// Try injecting into an in-flight run on the same route.
+	if req.RouteKey != "" {
+		switch s.deps.SessionCache.InjectMessage(req.RouteKey, req.Text) {
+		case InjectOK:
+			if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Cache-Control", "no-cache")
+				w.Header().Set("Connection", "keep-alive")
+				fmt.Fprintf(w, "event: injected\ndata: %s\n\n", req.RouteKey)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "injected",
+				"route":  req.RouteKey,
+			})
+			return
+		case InjectQueueFull:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "rejected",
+				"reason": "queue_full",
+				"route":  req.RouteKey,
+			})
+			return
+		case InjectNoActiveRun:
+			// Fall through to start a new RunAgent
+		}
 	}
 
 	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {

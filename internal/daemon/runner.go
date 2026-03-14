@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,8 +28,11 @@ type RunAgentRequest struct {
 	Agent      string `json:"agent,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`
 	NewSession bool   `json:"new_session,omitempty"`
-	Source     string `json:"source,omitempty"` // "slack", "line", "ptfrog", "webhook"
-	Sender     string `json:"sender,omitempty"` // user identifier from channel
+	Source     string `json:"source,omitempty"`    // "slack", "line", "ptfrog", "webhook"
+	Sender     string `json:"sender,omitempty"`    // user identifier from channel
+	Channel    string `json:"channel,omitempty"`   // channel/thread source context
+	ThreadID   string `json:"thread_id,omitempty"` // thread context for messaging platforms
+	RouteKey   string `json:"-"`                   // internal routing key
 }
 
 // Validate checks that the request has the minimum required fields.
@@ -42,6 +46,61 @@ func (r *RunAgentRequest) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ComputeRouteKey builds the route key for session cache/locking decisions.
+func ComputeRouteKey(req RunAgentRequest) string {
+	if req.Agent != "" {
+		return "agent:" + req.Agent
+	}
+	if req.SessionID != "" {
+		return "session:" + sanitizeRouteValue(req.SessionID)
+	}
+	if req.NewSession || shouldBypassRouteCache(req.Source) {
+		return ""
+	}
+	if req.Source != "" && req.Channel != "" {
+		return "default:" + sanitizeRouteValue(req.Source) + ":" + sanitizeRouteValue(req.Channel)
+	}
+	return ""
+}
+
+func shouldBypassRouteCache(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", ChannelWeb, "webhook", "cron", ChannelSchedule, ChannelSystem:
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeRouteValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	return url.PathEscape(trimmed)
+}
+
+// EnsureRouteKey computes and sets the route key if not already set.
+func (req *RunAgentRequest) EnsureRouteKey() {
+	if req == nil {
+		return
+	}
+	if req.RouteKey == "" {
+		req.RouteKey = ComputeRouteKey(*req)
+	}
+}
+
+func routeTitle(source, channel string) string {
+	if source == "" || channel == "" {
+		return ""
+	}
+	s := strings.ToLower(strings.TrimSpace(source))
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:] + " " + channel
 }
 
 // RunAgentResult is the output from RunAgent.
@@ -117,6 +176,7 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	if agentName == "default" {
 		agentName = ""
 	}
+	req.Agent = agentName
 	explicitAgent := agentName != "" // explicitly requested, not parsed from @mention
 
 	// Parse @mention if no explicit agent was provided.
@@ -142,6 +202,11 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 			agentOverride = a
 		}
 	}
+	req.Text = prompt
+	// Recompute route key after final agent resolution.
+	// Callers may precompute a default/source-channel key before @mention parsing.
+	// Recomputing here avoids cross-route contamination.
+	req.RouteKey = ComputeRouteKey(req)
 
 	if deps.EventBus != nil {
 		payload, _ := json.Marshal(map[string]string{
@@ -153,24 +218,80 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 		deps.EventBus.Emit(Event{Type: EventMessageReceived, Payload: payload})
 	}
 
-	// Per-agent lock serializes concurrent messages to the same agent.
-	deps.SessionCache.Lock(agentName)
-	defer deps.SessionCache.Unlock(agentName)
+	sessionsDir := deps.SessionCache.SessionsDir(agentName)
+	var sessMgr *session.Manager
 
-	sessMgr := deps.SessionCache.GetOrCreate(agentName)
-	if req.NewSession {
-		sessMgr.NewSession()
-	} else if req.SessionID != "" {
+	var route *routeEntry
+	// Empty route key = no cache entry for routing, always start a fresh local session.
+	if req.RouteKey != "" {
+		route = deps.SessionCache.LockRouteWithManager(req.RouteKey, sessionsDir)
+		sessMgr = route.manager
+		reqCtx, cancel := context.WithCancel(ctx)
+		route.done = make(chan struct{})
+		route.cancel = cancel
+		route.injectCh = make(chan string, 10) // buffered for async sends
+		ctx = reqCtx
+		defer func() {
+			route.mu.Lock()
+			sessionID := ""
+			if route.done != nil {
+				close(route.done)
+			}
+			route.done = nil
+			route.cancel = nil
+			route.injectCh = nil // clear after run completes
+			route.mu.Unlock()
+			if current := sessMgr.Current(); current != nil {
+				sessionID = current.ID
+			}
+			deps.SessionCache.SetRouteSessionID(req.RouteKey, sessionID)
+			deps.SessionCache.UnlockRoute(req.RouteKey)
+		}()
+	} else {
+		sessMgr = session.NewManager(sessionsDir)
+		defer func() {
+			if err := sessMgr.Close(); err != nil {
+				log.Printf("daemon: failed to close ephemeral session manager for %q: %v", sessionsDir, err)
+			}
+		}()
+	}
+
+	switch {
+	case req.SessionID != "":
 		// Resume a specific session by ID (reuses cached manager to avoid DB handle leak).
 		if _, err := sessMgr.Resume(req.SessionID); err != nil {
 			return nil, fmt.Errorf("session not found: %s", req.SessionID)
 		}
+	case req.NewSession || req.RouteKey == "":
+		sessMgr.NewSession()
+	case route != nil && route.sessionID != "":
+		if _, err := sessMgr.Resume(route.sessionID); err != nil {
+			log.Printf("daemon: failed to resume routed session %q for %q: %v", route.sessionID, req.RouteKey, err)
+			sessMgr.NewSession()
+		}
+	case strings.HasPrefix(req.RouteKey, "agent:"):
+		// Named-agent routes preserve manager-loaded current session across restarts.
+		if sessMgr.Current() == nil || sessMgr.Current().ID == "" {
+			sessMgr.NewSession()
+		}
+	default:
+		sessMgr.NewSession()
 	}
 	sess := sessMgr.Current()
 
 	// Persist session to disk before loop.Run() so there's a record even if
 	// the daemon crashes mid-execution. The final save after completion is
 	// still needed to capture the assistant's reply.
+	if req.Source != "" && req.Channel != "" {
+		sess.Source = req.Source
+		sess.Channel = req.Channel
+	}
+	if sess.Title == "New session" && req.RouteKey != "" {
+		title := routeTitle(req.Source, req.Channel)
+		if title != "" {
+			sess.Title = title
+		}
+	}
 	if err := sessMgr.Save(); err != nil {
 		log.Printf("daemon: failed to pre-save session: %v", err)
 	}
@@ -267,6 +388,10 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 		}
 	}
 
+	if route != nil && route.injectCh != nil {
+		loop.SetInjectCh(route.injectCh)
+	}
+
 	result, usage, runErr := loop.Run(ctx, prompt, history)
 	if runErr != nil {
 		return nil, fmt.Errorf("agent error for %s: %w", agentName, runErr)
@@ -282,16 +407,29 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	}
 
 	// Append the turn to the session and persist.
-	sess.Messages = append(sess.Messages,
-		client.Message{Role: "user", Content: client.NewTextContent(prompt)},
-		client.Message{Role: "assistant", Content: client.NewTextContent(result)},
-	)
 	source := req.Source
 	if source == "" {
 		source = "unknown"
 	}
+	sess.Messages = append(sess.Messages,
+		client.Message{Role: "user", Content: client.NewTextContent(prompt)},
+	)
 	sess.MessageMeta = append(sess.MessageMeta,
 		session.MessageMeta{Source: source},
+	)
+	// Persist any messages injected mid-run (HITL follow-ups).
+	for _, injMsg := range loop.InjectedMessages() {
+		sess.Messages = append(sess.Messages,
+			client.Message{Role: "user", Content: client.NewTextContent(injMsg)},
+		)
+		sess.MessageMeta = append(sess.MessageMeta,
+			session.MessageMeta{Source: source},
+		)
+	}
+	sess.Messages = append(sess.Messages,
+		client.Message{Role: "assistant", Content: client.NewTextContent(result)},
+	)
+	sess.MessageMeta = append(sess.MessageMeta,
 		session.MessageMeta{Source: source},
 	)
 	if err := sessMgr.Save(); err != nil {
