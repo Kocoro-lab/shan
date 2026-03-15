@@ -13,8 +13,8 @@ func TestRenderStartupHeader_FirstFrame(t *testing.T) {
 	if !strings.Contains(result, "Shannon CLI") {
 		t.Error("first frame should contain title in top border")
 	}
-	if !strings.Contains(result, "◢") {
-		t.Error("first frame should show frog logo")
+	if !strings.Contains(result, "▀") && !strings.Contains(result, "█") {
+		t.Error("first frame should show pixel frog logo")
 	}
 }
 
@@ -27,8 +27,8 @@ func TestRenderStartupHeader_FinalFrame(t *testing.T) {
 	if !strings.Contains(result, "Shannon CLI") {
 		t.Error("final frame should contain title")
 	}
-	if !strings.Contains(result, "◥") {
-		t.Error("final frame should contain frog logo")
+	if !strings.Contains(result, "▀") && !strings.Contains(result, "█") {
+		t.Error("final frame should contain pixel frog logo")
 	}
 	if !strings.Contains(result, "Tips") {
 		t.Error("final frame should contain Tips section")
@@ -62,8 +62,8 @@ func TestRenderStartupHeader_WideTerminal(t *testing.T) {
 
 func TestRenderStartupHeader_LogoAlwaysVisible(t *testing.T) {
 	result := renderStartupHeader(0, 80, "dev", "small", "https://api.test.com", "/tmp", nil, 0)
-	if !strings.Contains(result, "◢") {
-		t.Error("frame 0 should show frog logo")
+	if !strings.Contains(result, "▀") && !strings.Contains(result, "█") {
+		t.Error("frame 0 should show pixel frog logo")
 	}
 }
 

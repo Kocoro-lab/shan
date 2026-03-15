@@ -13,34 +13,18 @@ import (
 	"github.com/Kocoro-lab/shan/internal/session"
 )
 
-// Tree frog — two animation frames (eyes blink).
-// Note: ◢◣◥◤█ render as 2-cell wide in most terminals.
-var frogFrame0 = []string{
-	"        ◉   ◉",
-	"       ◢█████◣",
-	"       ◥█████◤",
-	"        ╹   ╹",
-}
-var frogFrame1 = []string{
-	"        ─   ─",
-	"       ◢█████◣",
-	"       ◥█████◤",
-	"        ╹   ╹",
-}
-
 // Color palette for the startup header.
 var (
-	frogColor   = lipgloss.Color("76")  // frog green — logo
 	borderColor = lipgloss.Color("76")  // frog green — box border
 	accentColor = lipgloss.Color("76")  // frog green — section headers
-	dimColor    = lipgloss.Color("243")     // medium gray — secondary text
-	infoColor   = lipgloss.Color("39")      // blue — activity header
+	dimColor    = lipgloss.Color("243") // medium gray — secondary text
+	infoColor   = lipgloss.Color("39")  // blue — activity header
 )
 
 const (
-	headerTotalFrames = 9 // one blink: closed→open→closed→open (~0.7s total)
+	headerTotalFrames = 12 // startup: crouch→jump→land→blink (~1s total)
 	headerTickMs      = 80 // ms per frame
-	headerLeftWidth   = 22 // left column visual width
+	headerLeftWidth   = 16 // left column visual width
 )
 
 // Tips shown in the info section of the startup header.
@@ -75,15 +59,12 @@ func renderStartupHeader(frame int, width int, version string, modelTier string,
 	// --- Build left column lines ---
 	var leftLines []string
 
-	// Frog logo: eyes blink every 3 ticks (~240ms per pose).
-	// Starts closed, ends open: closed→open→closed→open.
-	frogStyle := lipgloss.NewStyle().Foreground(frogColor)
-	frogLines := frogFrame1
-	if (frame/3)%2 == 1 {
-		frogLines = frogFrame0
-	}
-	for _, line := range frogLines {
-		leftLines = append(leftLines, frogStyle.Render(line))
+	// Pixel-art frog: startup animation (crouch→jump→land→blink).
+	// Center the 10-col frog within the headerLeftWidth column.
+	const frogVisualWidth = 10
+	frogIndent := strings.Repeat(" ", (headerLeftWidth-frogVisualWidth)/2)
+	for _, line := range renderFrogGrid(frogAnimFrame(frame)) {
+		leftLines = append(leftLines, frogIndent+line)
 	}
 
 	// Model + CWD + Endpoint — always visible.
