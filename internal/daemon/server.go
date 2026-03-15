@@ -690,34 +690,95 @@ func isScheduleCreateSyncError(err error) bool {
 		strings.HasPrefix(msg, "schedule created but launchctl load failed:")
 }
 
+// configKeyAliases maps known camelCase/PascalCase JSON field names that legacy
+// clients may send back to their canonical snake_case YAML equivalents.
+var configKeyAliases = map[string]string{
+	"apiKey":          "api_key",
+	"APIKey":          "api_key",
+	"modelTier":       "model_tier",
+	"ModelTier":       "model_tier",
+	"autoUpdateCheck": "auto_update_check",
+	"AutoUpdateCheck": "auto_update_check",
+	"mcpServers":      "mcp_servers",
+	"MCPServers":      "mcp_servers",
+}
+
+// normalizePatchKeys rewrites known camelCase aliases to snake_case at the
+// top level of m only. All aliases in configKeyAliases are top-level config
+// keys; nested maps are intentionally not traversed to avoid false-positive
+// renames of unrelated fields that share an alias name.
+// When both an alias and its canonical key are present, the canonical wins
+// and the alias is discarded.
+func normalizePatchKeys(m map[string]interface{}) {
+	if m == nil {
+		return
+	}
+	for k := range m {
+		canonical, aliased := configKeyAliases[k]
+		if !aliased {
+			continue
+		}
+		if _, canonicalExists := m[canonical]; !canonicalExists {
+			m[canonical] = m[k]
+		}
+		delete(m, k)
+	}
+}
+
+// stripRedactedSecrets removes "***" placeholder values from the known sensitive
+// paths only: top-level api_key and mcp_servers.<name>.env.<var>. This prevents
+// a GET→PATCH round-trip from overwriting real credentials with redacted values,
+// without globally blocking the literal string "***" as a config value elsewhere.
+func stripRedactedSecrets(m map[string]interface{}) {
+	if m == nil {
+		return
+	}
+	if s, ok := m["api_key"].(string); ok && s == "***" {
+		delete(m, "api_key")
+	}
+	servers, ok := m["mcp_servers"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, srv := range servers {
+		srvMap, ok := srv.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		env, ok := srvMap["env"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for k, v := range env {
+			if s, ok := v.(string); ok && s == "***" {
+				delete(env, k)
+			}
+		}
+	}
+}
+
 // redactConfigSecrets removes sensitive values from a config map before
-// sending it over the API. Redacts api_key/apiKey at top level and env
-// vars inside mcp_servers/mcpServers entries.
+// sending it over the API. Redacts api_key at top level and env vars
+// inside mcp_servers entries.
 func redactConfigSecrets(m map[string]interface{}) {
 	if m == nil {
 		return
 	}
-	// Redact top-level API key (both snake_case and camelCase)
-	for _, key := range []string{"api_key", "apiKey"} {
-		if _, ok := m[key]; ok {
-			m[key] = "***"
-		}
+	if _, ok := m["api_key"]; ok {
+		m["api_key"] = "***"
 	}
-	// Redact MCP server env vars (contain API keys, tokens)
-	for _, key := range []string{"mcp_servers", "mcpServers"} {
-		servers, ok := m[key].(map[string]interface{})
+	servers, ok := m["mcp_servers"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, srv := range servers {
+		srvMap, ok := srv.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		for _, srv := range servers {
-			srvMap, ok := srv.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if env, ok := srvMap["env"].(map[string]interface{}); ok {
-				for k := range env {
-					env[k] = "***"
-				}
+		if env, ok := srvMap["env"].(map[string]interface{}); ok {
+			for k := range env {
+				env[k] = "***"
 			}
 		}
 	}
@@ -1681,6 +1742,8 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 		current = make(map[string]interface{})
 	}
 
+	normalizePatchKeys(patch)
+	stripRedactedSecrets(patch)
 	deepMerge(current, patch)
 
 	data, err := yaml.Marshal(current)

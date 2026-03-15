@@ -613,3 +613,136 @@ func TestEventsSSEEndpoint(t *testing.T) {
 		t.Fatalf("expected agent in data, got %q", dataLine)
 	}
 }
+
+func TestNormalizePatchKeys(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      map[string]interface{}
+		want       map[string]interface{}
+		applyTwice bool // set to verify idempotency
+	}{
+		{
+			name:  "camelCase mcpServers renamed",
+			input: map[string]interface{}{"mcpServers": map[string]interface{}{"x-twitter": map[string]interface{}{}}},
+			want:  map[string]interface{}{"mcp_servers": map[string]interface{}{"x-twitter": map[string]interface{}{}}},
+		},
+		{
+			name:  "PascalCase MCPServers renamed",
+			input: map[string]interface{}{"MCPServers": map[string]interface{}{}},
+			want:  map[string]interface{}{"mcp_servers": map[string]interface{}{}},
+		},
+		{
+			name:  "apiKey renamed",
+			input: map[string]interface{}{"apiKey": "sk_abc"},
+			want:  map[string]interface{}{"api_key": "sk_abc"},
+		},
+		{
+			name:  "canonical snake_case unchanged",
+			input: map[string]interface{}{"mcp_servers": map[string]interface{}{}, "api_key": "sk_abc"},
+			want:  map[string]interface{}{"mcp_servers": map[string]interface{}{}, "api_key": "sk_abc"},
+		},
+		{
+			name:       "idempotent: applying twice gives same result",
+			input:      map[string]interface{}{"mcpServers": map[string]interface{}{"s": map[string]interface{}{}}},
+			want:       map[string]interface{}{"mcp_servers": map[string]interface{}{"s": map[string]interface{}{}}},
+			applyTwice: true,
+		},
+		{
+			name:  "alias + canonical both present: canonical wins, alias discarded",
+			input: map[string]interface{}{"mcpServers": map[string]interface{}{"alias": map[string]interface{}{}}, "mcp_servers": map[string]interface{}{"canonical": map[string]interface{}{}}},
+			want:  map[string]interface{}{"mcp_servers": map[string]interface{}{"canonical": map[string]interface{}{}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalizePatchKeys(tt.input)
+			if tt.applyTwice {
+				normalizePatchKeys(tt.input)
+			}
+			if len(tt.input) != len(tt.want) {
+				t.Fatalf("key count mismatch: got %v, want %v", tt.input, tt.want)
+			}
+			for k := range tt.want {
+				if _, ok := tt.input[k]; !ok {
+					t.Errorf("missing expected key %q in result %v", k, tt.input)
+				}
+			}
+			for k := range tt.input {
+				if _, ok := tt.want[k]; !ok {
+					t.Errorf("unexpected key %q in result %v", k, tt.input)
+				}
+			}
+		})
+	}
+}
+
+func TestStripRedactedSecrets(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           map[string]interface{}
+		wantDeleted     []string // top-level keys that should be absent
+		wantKept        []string // top-level keys that should still be present
+		wantEnvDeleted  []string // mcp_servers.x-twitter.env keys that should be absent
+		wantEnvKept     []string // mcp_servers.x-twitter.env keys that should still be present
+	}{
+		{
+			name:        "api_key *** is dropped",
+			input:       map[string]interface{}{"api_key": "***"},
+			wantDeleted: []string{"api_key"},
+		},
+		{
+			name:     "api_key real value is kept",
+			input:    map[string]interface{}{"api_key": "sk_real"},
+			wantKept: []string{"api_key"},
+		},
+		{
+			name: "mcp env *** dropped, real kept",
+			input: map[string]interface{}{
+				"mcp_servers": map[string]interface{}{
+					"x-twitter": map[string]interface{}{
+						"env": map[string]interface{}{
+							"ACCESS_TOKEN":  "***",
+							"ACCESS_TOKEN2": "realvalue",
+						},
+					},
+				},
+			},
+			wantEnvDeleted: []string{"ACCESS_TOKEN"},
+			wantEnvKept:    []string{"ACCESS_TOKEN2"},
+		},
+		{
+			name:     "literal *** in non-sensitive field is kept",
+			input:    map[string]interface{}{"model_tier": "***"},
+			wantKept: []string{"model_tier"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stripRedactedSecrets(tt.input)
+			for _, k := range tt.wantDeleted {
+				if _, ok := tt.input[k]; ok {
+					t.Errorf("expected key %q to be deleted, still present", k)
+				}
+			}
+			for _, k := range tt.wantKept {
+				if _, ok := tt.input[k]; !ok {
+					t.Errorf("expected key %q to be kept, was deleted", k)
+				}
+			}
+			if len(tt.wantEnvDeleted) > 0 || len(tt.wantEnvKept) > 0 {
+				servers := tt.input["mcp_servers"].(map[string]interface{})
+				env := servers["x-twitter"].(map[string]interface{})["env"].(map[string]interface{})
+				for _, k := range tt.wantEnvDeleted {
+					if _, ok := env[k]; ok {
+						t.Errorf("expected env key %q to be dropped, still present", k)
+					}
+				}
+				for _, k := range tt.wantEnvKept {
+					if _, ok := env[k]; !ok {
+						t.Errorf("expected env key %q to be kept, was deleted", k)
+					}
+				}
+			}
+		})
+	}
+}

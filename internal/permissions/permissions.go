@@ -11,11 +11,11 @@ import (
 
 // PermissionsConfig defines user-configurable permission rules.
 type PermissionsConfig struct {
-	AllowedDirs       []string `yaml:"allowed_dirs"`
-	AllowedCommands   []string `yaml:"allowed_commands"`
-	DeniedCommands    []string `yaml:"denied_commands"`
-	SensitivePatterns []string `yaml:"sensitive_patterns"`
-	NetworkAllowlist  []string `yaml:"network_allowlist"`
+	AllowedDirs       []string `yaml:"allowed_dirs"        json:"allowed_dirs"`
+	AllowedCommands   []string `yaml:"allowed_commands"    json:"allowed_commands"`
+	DeniedCommands    []string `yaml:"denied_commands"     json:"denied_commands"`
+	SensitivePatterns []string `yaml:"sensitive_patterns"  json:"sensitive_patterns"`
+	NetworkAllowlist  []string `yaml:"network_allowlist"   json:"network_allowlist"`
 }
 
 // hardBlockPatterns are always denied and cannot be overridden by config.

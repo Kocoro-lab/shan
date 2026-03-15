@@ -32,16 +32,20 @@ const (
 	exitCodeDeny     = 2
 )
 
+// HookConfig uses PascalCase event names in both YAML and JSON to match the
+// established schema (e.g. "PreToolUse" in config.yaml). This is intentionally
+// inconsistent with the snake_case used by other config fields; clients doing a
+// GET /config → PATCH /config round-trip must preserve these PascalCase keys.
 type HookConfig struct {
-	PreToolUse   []HookEntry `yaml:"PreToolUse"`
-	PostToolUse  []HookEntry `yaml:"PostToolUse"`
-	SessionStart []HookEntry `yaml:"SessionStart"`
-	Stop         []HookEntry `yaml:"Stop"`
+	PreToolUse   []HookEntry `yaml:"PreToolUse"   json:"PreToolUse"`
+	PostToolUse  []HookEntry `yaml:"PostToolUse"  json:"PostToolUse"`
+	SessionStart []HookEntry `yaml:"SessionStart" json:"SessionStart"`
+	Stop         []HookEntry `yaml:"Stop"         json:"Stop"`
 }
 
 type HookEntry struct {
-	Matcher string `yaml:"matcher"`
-	Command string `yaml:"command"`
+	Matcher string `yaml:"matcher" json:"matcher"`
+	Command string `yaml:"command" json:"command"`
 }
 
 type HookInput struct {

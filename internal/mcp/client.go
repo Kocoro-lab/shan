@@ -14,13 +14,13 @@ import (
 
 // MCPServerConfig describes how to connect to an MCP server.
 type MCPServerConfig struct {
-	Command  string            `yaml:"command" mapstructure:"command"`
-	Args     []string          `yaml:"args,omitempty" mapstructure:"args"`
-	Env      map[string]string `yaml:"env,omitempty" mapstructure:"env"`
-	Type     string            `yaml:"type,omitempty" mapstructure:"type"`         // "stdio" (default) or "http"
-	URL      string            `yaml:"url,omitempty" mapstructure:"url"`           // for http type
-	Disabled bool              `yaml:"disabled,omitempty" mapstructure:"disabled"` // skip this server
-	Context  string            `yaml:"context,omitempty" mapstructure:"context"`   // LLM context injected into system prompt
+	Command  string            `yaml:"command"            mapstructure:"command"  json:"command"`
+	Args     []string          `yaml:"args,omitempty"     mapstructure:"args"     json:"args,omitempty"`
+	Env      map[string]string `yaml:"env,omitempty"      mapstructure:"env"      json:"env,omitempty"`
+	Type     string            `yaml:"type,omitempty"     mapstructure:"type"     json:"type,omitempty"`     // "stdio" (default) or "http"
+	URL      string            `yaml:"url,omitempty"      mapstructure:"url"      json:"url,omitempty"`      // for http type
+	Disabled bool              `yaml:"disabled,omitempty" mapstructure:"disabled" json:"disabled,omitempty"` // skip this server
+	Context  string            `yaml:"context,omitempty"  mapstructure:"context"  json:"context,omitempty"`  // LLM context injected into system prompt
 }
 
 // RemoteTool represents a tool discovered from an MCP server.

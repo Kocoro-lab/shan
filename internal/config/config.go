@@ -20,48 +20,48 @@ type ConfigSource struct {
 }
 
 type Config struct {
-	Endpoint        string                       `mapstructure:"endpoint" yaml:"endpoint"`
-	APIKey          string                       `mapstructure:"api_key" yaml:"api_key"`
-	ModelTier       string                       `mapstructure:"model_tier" yaml:"model_tier"`
-	AutoUpdateCheck bool                         `mapstructure:"auto_update_check" yaml:"auto_update_check"`
-	Permissions     permissions.PermissionsConfig `mapstructure:"permissions" yaml:"permissions"`
-	Agent           AgentConfig                  `mapstructure:"agent" yaml:"agent"`
-	Tools           ToolsConfig                  `mapstructure:"tools" yaml:"tools"`
-	Cloud           CloudConfig                  `mapstructure:"cloud" yaml:"cloud"`
-	Daemon          DaemonConfig                 `mapstructure:"daemon" yaml:"daemon"`
-	Hooks           hooks.HookConfig                `mapstructure:"hooks" yaml:"hooks"`
-	MCPServers      map[string]mcp.MCPServerConfig  `mapstructure:"mcp_servers" yaml:"mcp_servers"`
-	Sources         map[string]ConfigSource         `mapstructure:"-" yaml:"-"`
+	Endpoint        string                          `mapstructure:"endpoint"          yaml:"endpoint"          json:"endpoint"`
+	APIKey          string                          `mapstructure:"api_key"           yaml:"api_key"           json:"api_key"`
+	ModelTier       string                          `mapstructure:"model_tier"        yaml:"model_tier"        json:"model_tier"`
+	AutoUpdateCheck bool                            `mapstructure:"auto_update_check" yaml:"auto_update_check" json:"auto_update_check"`
+	Permissions     permissions.PermissionsConfig   `mapstructure:"permissions"       yaml:"permissions"       json:"permissions"`
+	Agent           AgentConfig                     `mapstructure:"agent"             yaml:"agent"             json:"agent"`
+	Tools           ToolsConfig                     `mapstructure:"tools"             yaml:"tools"             json:"tools"`
+	Cloud           CloudConfig                     `mapstructure:"cloud"             yaml:"cloud"             json:"cloud"`
+	Daemon          DaemonConfig                    `mapstructure:"daemon"            yaml:"daemon"            json:"daemon"`
+	Hooks           hooks.HookConfig                `mapstructure:"hooks"             yaml:"hooks"             json:"hooks"`
+	MCPServers      map[string]mcp.MCPServerConfig  `mapstructure:"mcp_servers"       yaml:"mcp_servers"       json:"mcp_servers"`
+	Sources         map[string]ConfigSource         `mapstructure:"-"                 yaml:"-"                 json:"-"`
 }
 
 type AgentConfig struct {
-	MaxIterations   int     `mapstructure:"max_iterations" yaml:"max_iterations"`
-	Temperature     float64 `mapstructure:"temperature" yaml:"temperature"`
-	MaxTokens       int     `mapstructure:"max_tokens" yaml:"max_tokens"`
-	Thinking        bool    `mapstructure:"thinking" yaml:"thinking"`
-	ThinkingMode    string  `mapstructure:"thinking_mode" yaml:"thinking_mode"` // "adaptive" (default) or "enabled" (fixed budget)
-	ThinkingBudget  int     `mapstructure:"thinking_budget" yaml:"thinking_budget"`
-	ReasoningEffort string  `mapstructure:"reasoning_effort" yaml:"reasoning_effort"`
-	Model           string  `mapstructure:"model" yaml:"model"`          // specific model override
-	ContextWindow   int     `mapstructure:"context_window" yaml:"context_window"` // model context window in tokens
+	MaxIterations   int     `mapstructure:"max_iterations"   yaml:"max_iterations"   json:"max_iterations"`
+	Temperature     float64 `mapstructure:"temperature"      yaml:"temperature"      json:"temperature"`
+	MaxTokens       int     `mapstructure:"max_tokens"       yaml:"max_tokens"       json:"max_tokens"`
+	Thinking        bool    `mapstructure:"thinking"         yaml:"thinking"         json:"thinking"`
+	ThinkingMode    string  `mapstructure:"thinking_mode"    yaml:"thinking_mode"    json:"thinking_mode"` // "adaptive" (default) or "enabled" (fixed budget)
+	ThinkingBudget  int     `mapstructure:"thinking_budget"  yaml:"thinking_budget"  json:"thinking_budget"`
+	ReasoningEffort string  `mapstructure:"reasoning_effort" yaml:"reasoning_effort" json:"reasoning_effort"`
+	Model           string  `mapstructure:"model"            yaml:"model"            json:"model"`           // specific model override
+	ContextWindow   int     `mapstructure:"context_window"   yaml:"context_window"   json:"context_window"`  // model context window in tokens
 }
 
 type ToolsConfig struct {
-	BashTimeout       int `mapstructure:"bash_timeout" yaml:"bash_timeout"`
-	BashMaxOutput     int `mapstructure:"bash_max_output" yaml:"bash_max_output"`
-	ResultTruncation  int `mapstructure:"result_truncation" yaml:"result_truncation"`
-	ArgsTruncation    int `mapstructure:"args_truncation" yaml:"args_truncation"`
-	ServerToolTimeout int `mapstructure:"server_tool_timeout" yaml:"server_tool_timeout"`
-	GrepMaxResults    int `mapstructure:"grep_max_results" yaml:"grep_max_results"`
+	BashTimeout       int `mapstructure:"bash_timeout"        yaml:"bash_timeout"        json:"bash_timeout"`
+	BashMaxOutput     int `mapstructure:"bash_max_output"     yaml:"bash_max_output"     json:"bash_max_output"`
+	ResultTruncation  int `mapstructure:"result_truncation"   yaml:"result_truncation"   json:"result_truncation"`
+	ArgsTruncation    int `mapstructure:"args_truncation"     yaml:"args_truncation"     json:"args_truncation"`
+	ServerToolTimeout int `mapstructure:"server_tool_timeout" yaml:"server_tool_timeout" json:"server_tool_timeout"`
+	GrepMaxResults    int `mapstructure:"grep_max_results"    yaml:"grep_max_results"    json:"grep_max_results"`
 }
 
 type CloudConfig struct {
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-	Timeout int  `mapstructure:"timeout" yaml:"timeout"` // seconds
+	Enabled bool `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Timeout int  `mapstructure:"timeout" yaml:"timeout" json:"timeout"` // seconds
 }
 
 type DaemonConfig struct {
-	AutoApprove bool `mapstructure:"auto_approve" yaml:"auto_approve"`
+	AutoApprove bool `mapstructure:"auto_approve" yaml:"auto_approve" json:"auto_approve"`
 }
 
 func ShannonDir() string {
