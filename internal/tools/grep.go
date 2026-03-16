@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/Kocoro-lab/shan/internal/agent"
 )
@@ -70,11 +71,20 @@ func (t *GrepTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, 
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return agent.ToolResult{Content: "no matches found"}, nil
 		}
-		// Exit code 2 = syntax error in pattern (validation), other = transient
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+		// Exit code 2 in rg/grep covers multiple failure modes: bad regex,
+		// missing paths, permission errors, etc. Classify by stderr content
+		// rather than assuming all exit-2 is regex syntax.
+		lower := strings.ToLower(result)
+		switch {
+		case strings.Contains(lower, "regex") || strings.Contains(lower, "syntax") || strings.Contains(lower, "parse error"):
 			return agent.ValidationError(fmt.Sprintf("invalid regex pattern: %s", result)), nil
+		case strings.Contains(lower, "permission denied"):
+			return agent.PermissionError(fmt.Sprintf("grep: %s", result)), nil
+		case strings.Contains(lower, "no such file") || strings.Contains(lower, "not found"):
+			return agent.ValidationError(fmt.Sprintf("path not found: %s", result)), nil
+		default:
+			return agent.ToolResult{Content: fmt.Sprintf("grep error: %v\n%s", err, result), IsError: true}, nil
 		}
-		return agent.TransientError(fmt.Sprintf("grep failed: %v\n%s", err, result)), nil
 	}
 
 	return agent.ToolResult{Content: result}, nil
