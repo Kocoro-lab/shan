@@ -27,10 +27,12 @@ type PromptOptions struct {
 	Skills       []*skills.Skill
 	CWD          string // current working directory
 	SessionInfo  string // optional session context
-	MemoryDir    string // directory containing MEMORY.md for agent memory writes
-	StickyContext string // Session-scoped facts injected verbatim — never truncated or compacted.
-	// Use for key transactional data (IDs, amounts, names) that must survive context compaction.
-	// Typically populated by the daemon runner with session source/channel/task metadata.
+	MemoryDir     string // directory containing MEMORY.md for agent memory writes
+	// StickyContext holds session-scoped facts injected verbatim into the system prompt.
+	// Never truncated or compacted. Use for key transactional data (IDs, amounts, names)
+	// that must survive context compaction. Populated by the daemon runner with session
+	// source/channel/task metadata, or by callers needing persistent session facts.
+	StickyContext string
 }
 
 // BuildSystemPrompt assembles the complete system prompt from layers.

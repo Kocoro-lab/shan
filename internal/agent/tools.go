@@ -44,7 +44,7 @@ type ToolResult struct {
 // TransientError returns a ToolResult for timeout/network failures where retry may help.
 func TransientError(msg string) ToolResult {
 	return ToolResult{
-		Content:       "[transient] " + msg,
+		Content:       "[transient error] " + msg,
 		IsError:       true,
 		ErrorCategory: ErrCategoryTransient,
 		IsRetryable:   true,

@@ -57,10 +57,16 @@ func (t *FileWriteTool) Run(ctx context.Context, argsJSON string) (agent.ToolRes
 	}
 
 	if err := os.MkdirAll(filepath.Dir(args.Path), 0755); err != nil {
+		if os.IsPermission(err) {
+			return agent.PermissionError(fmt.Sprintf("cannot create directory %s: permission denied", filepath.Dir(args.Path))), nil
+		}
 		return agent.ToolResult{Content: fmt.Sprintf("error creating directory: %v", err), IsError: true}, nil
 	}
 
 	if err := os.WriteFile(args.Path, []byte(args.Content), 0644); err != nil {
+		if os.IsPermission(err) {
+			return agent.PermissionError(fmt.Sprintf("cannot write %s: permission denied", args.Path)), nil
+		}
 		return agent.ToolResult{Content: fmt.Sprintf("error writing file: %v", err), IsError: true}, nil
 	}
 

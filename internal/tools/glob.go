@@ -47,7 +47,7 @@ func (t *GlobTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, 
 
 	matches, err := doublestar.Glob(os.DirFS(root), args.Pattern)
 	if err != nil {
-		return agent.ToolResult{Content: fmt.Sprintf("glob error: %v", err), IsError: true}, nil
+		return agent.ValidationError(fmt.Sprintf("glob error: %v", err)), nil
 	}
 
 	if len(matches) == 0 {

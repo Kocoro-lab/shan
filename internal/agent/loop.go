@@ -79,7 +79,7 @@ const baseSystemPrompt = `You are Shannon, an AI assistant running in a CLI term
 ## Error Handling
 
 When a tool returns an error, use the prefix to decide your response:
-- **[transient]**: A timeout or network failure. Retry once with the same arguments. If it fails again, report the issue to the user.
+- **[transient error]**: A timeout or network failure. Retry once with the same arguments. If it fails again, report the issue to the user.
 - **[validation error]**: Your arguments were wrong. Fix them before retrying. Do not retry with the same arguments.
 - **[business error]**: A policy or constraint was violated. Do NOT retry — explain the constraint to the user and suggest alternatives.
 - **[permission error]**: Access was denied. Escalate to the user — they may need to grant permissions or provide credentials.
@@ -214,6 +214,7 @@ type AgentLoop struct {
 	agentSkills     []*skills.Skill
 	contextWindow   int
 	memoryDir        string // directory containing MEMORY.md; re-read each Run(), write-before-compact target
+	stickyContext    string // session-scoped facts injected verbatim into system prompt; never truncated
 	injectCh         chan string   // receives user messages injected mid-run
 	injectedMessages []string     // messages injected during the last Run(); cleared on each Run() call
 }
@@ -292,6 +293,13 @@ func (a *AgentLoop) SetMaxIterations(n int) {
 // For named agents: ~/.shannon/agents/<name>/
 func (a *AgentLoop) SetMemoryDir(dir string) {
 	a.memoryDir = dir
+}
+
+// SetStickyContext sets session-scoped facts injected verbatim into the system prompt.
+// These survive context compaction (they're part of the system message, not conversation history).
+// Typically populated with session source/channel/task metadata in daemon mode.
+func (a *AgentLoop) SetStickyContext(ctx string) {
+	a.stickyContext = ctx
 }
 
 // SetInjectCh sets the channel for mid-run message injection.
@@ -382,14 +390,15 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 	}
 
 	systemPrompt := prompt.BuildSystemPrompt(prompt.PromptOptions{
-		BasePrompt:   basePrompt,
-		Memory:       mem,
-		Instructions: instrText,
-		ToolNames:    toolNames,
-		MCPContext:   a.mcpContext,
-		CWD:          cwd,
-		Skills:       a.agentSkills,
-		MemoryDir:    a.memoryDir,
+		BasePrompt:    basePrompt,
+		Memory:        mem,
+		Instructions:  instrText,
+		ToolNames:     toolNames,
+		MCPContext:    a.mcpContext,
+		CWD:           cwd,
+		Skills:        a.agentSkills,
+		MemoryDir:     a.memoryDir,
+		StickyContext: a.stickyContext,
 	})
 
 	// Append cloud delegation guidance if tool is registered

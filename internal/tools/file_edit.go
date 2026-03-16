@@ -57,20 +57,23 @@ func (t *FileEditTool) Run(ctx context.Context, argsJSON string) (agent.ToolResu
 
 	data, err := os.ReadFile(args.Path)
 	if err != nil {
+		if os.IsPermission(err) {
+			return agent.PermissionError(fmt.Sprintf("cannot read %s: permission denied", args.Path)), nil
+		}
 		return agent.ToolResult{Content: fmt.Sprintf("error reading file: %v", err), IsError: true}, nil
 	}
 
 	if args.OldString == "" {
-		return agent.ToolResult{Content: "old_string must not be empty", IsError: true}, nil
+		return agent.ValidationError("old_string must not be empty"), nil
 	}
 
 	content := string(data)
 	count := strings.Count(content, args.OldString)
 	if count == 0 {
-		return agent.ToolResult{Content: "old_string not found in file", IsError: true}, nil
+		return agent.ValidationError("old_string not found in file"), nil
 	}
 	if count > 1 {
-		return agent.ToolResult{Content: fmt.Sprintf("old_string found %d times (must be unique)", count), IsError: true}, nil
+		return agent.ValidationError(fmt.Sprintf("old_string found %d times (must be unique)", count)), nil
 	}
 
 	newContent := strings.Replace(content, args.OldString, args.NewString, 1)
@@ -80,6 +83,9 @@ func (t *FileEditTool) Run(ctx context.Context, argsJSON string) (agent.ToolResu
 		perm = info.Mode().Perm()
 	}
 	if err := os.WriteFile(args.Path, []byte(newContent), perm); err != nil {
+		if os.IsPermission(err) {
+			return agent.PermissionError(fmt.Sprintf("cannot write %s: permission denied", args.Path)), nil
+		}
 		return agent.ToolResult{Content: fmt.Sprintf("error writing file: %v", err), IsError: true}, nil
 	}
 

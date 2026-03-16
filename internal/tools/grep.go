@@ -70,7 +70,11 @@ func (t *GrepTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, 
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return agent.ToolResult{Content: "no matches found"}, nil
 		}
-		return agent.ToolResult{Content: fmt.Sprintf("grep error: %v\n%s", err, result), IsError: true}, nil
+		// Exit code 2 = syntax error in pattern (validation), other = transient
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 2 {
+			return agent.ValidationError(fmt.Sprintf("invalid regex pattern: %s", result)), nil
+		}
+		return agent.TransientError(fmt.Sprintf("grep failed: %v\n%s", err, result)), nil
 	}
 
 	return agent.ToolResult{Content: result}, nil

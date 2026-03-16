@@ -234,7 +234,7 @@ func TestToolResultErrorHelpers(t *testing.T) {
 			wantIsError: true,
 			wantCat:     ErrCategoryTransient,
 			wantRetry:   true,
-			wantPrefix:  "[transient]",
+			wantPrefix:  "[transient error]",
 		},
 		{
 			name:        "ValidationError",

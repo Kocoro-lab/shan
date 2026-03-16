@@ -377,6 +377,24 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 			loop.SetContextWindow(*ac.ContextWindow)
 		}
 	}
+	// Inject session metadata as sticky context so it survives compaction.
+	if req.Source != "" || req.Channel != "" || req.Sender != "" {
+		var parts []string
+		if req.Source != "" {
+			parts = append(parts, "Source: "+req.Source)
+		}
+		if req.Channel != "" {
+			parts = append(parts, "Channel: "+req.Channel)
+		}
+		if req.Sender != "" {
+			parts = append(parts, "Sender: "+req.Sender)
+		}
+		if agentName != "" {
+			parts = append(parts, "Agent: "+agentName)
+		}
+		loop.SetStickyContext(strings.Join(parts, "\n"))
+	}
+
 	loop.SetHandler(handler)
 
 	// Wire handler and agent context to cloud_delegate tool.
