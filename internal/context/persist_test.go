@@ -2,10 +2,12 @@ package context
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Kocoro-lab/shan/internal/client"
 )
@@ -256,4 +258,202 @@ func TestBoundedAppend(t *testing.T) {
 			t.Error("should create file with content")
 		}
 	})
+}
+
+func TestConsolidateMemory_SkipsWhenFewFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("- user fact 1\n"), 0644)
+	// Only 2 auto files (threshold is 12)
+	os.WriteFile(filepath.Join(dir, "auto-2026-03-01-aaaaaa.md"), []byte("- fact a\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "auto-2026-03-02-bbbbbb.md"), []byte("- fact b\n"), 0644)
+
+	err := ConsolidateMemory(context.Background(), nil, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// MEMORY.md unchanged
+	data, _ := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	if string(data) != "- user fact 1\n" {
+		t.Errorf("MEMORY.md should be unchanged, got: %q", string(data))
+	}
+}
+
+func TestConsolidateMemory_SkipsWhenRecent(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("- user fact\n"), 0644)
+	// 12 auto files
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("auto-2026-03-%02d-%06x.md", i+1, i)
+		os.WriteFile(filepath.Join(dir, name), []byte(fmt.Sprintf("- fact %d\n", i)), 0644)
+	}
+	// Touch marker as recent
+	os.WriteFile(filepath.Join(dir, ".memory_gc"), []byte(""), 0644)
+
+	err := ConsolidateMemory(context.Background(), nil, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Auto files should still exist (GC skipped)
+	matches, _ := filepath.Glob(filepath.Join(dir, "auto-*.md"))
+	if len(matches) != 12 {
+		t.Errorf("expected 12 auto files (GC skipped), got %d", len(matches))
+	}
+}
+
+func TestConsolidateMemory_Consolidates(t *testing.T) {
+	dir := t.TempDir()
+
+	// User content + auto-persisted section in MEMORY.md
+	memory := "- user preference: dark mode\n- user prefers Go\n\n" +
+		"## Auto-persisted (2026-03-01 10:00)\n\n- old auto fact 1\n- old auto fact 2\n\n" +
+		"- [2026-03-01] See [auto-2026-03-01-aaaaaa.md](auto-2026-03-01-aaaaaa.md) for details\n"
+	os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(memory), 0644)
+
+	// 12 auto files
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("auto-2026-03-%02d-%06x.md", i+1, i)
+		content := fmt.Sprintf("# Auto-persisted Learnings\n\n- detail fact %d\n", i)
+		os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
+	}
+
+	// Set marker to 8 days ago so cooldown passes
+	markerPath := filepath.Join(dir, ".memory_gc")
+	os.WriteFile(markerPath, []byte(""), 0644)
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	os.Chtimes(markerPath, oldTime, oldTime)
+
+	mock := &mockCompleter{
+		response: &client.CompletionResponse{
+			OutputText: "- consolidated fact A\n- consolidated fact B",
+		},
+	}
+
+	err := ConsolidateMemory(context.Background(), mock, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Ensure inline auto-persisted content from MEMORY.md is included in LLM input.
+	if !strings.Contains(mock.lastReq.Messages[1].Content.Text(), "old auto fact 1") {
+		t.Error("consolidation should include inline auto section in LLM input")
+	}
+
+	// Auto files should be deleted
+	matches, _ := filepath.Glob(filepath.Join(dir, "auto-*.md"))
+	if len(matches) != 0 {
+		t.Errorf("expected 0 auto files after GC, got %d", len(matches))
+	}
+
+	// MEMORY.md should have user content + consolidated auto content
+	data, _ := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	result := string(data)
+	if !strings.Contains(result, "user preference: dark mode") {
+		t.Error("user content should be preserved")
+	}
+	if !strings.Contains(result, "user prefers Go") {
+		t.Error("user content should be preserved")
+	}
+	if !strings.Contains(result, "consolidated fact A") {
+		t.Error("consolidated content should be present")
+	}
+	if !strings.Contains(result, "Auto-consolidated") {
+		t.Error("should have Auto-consolidated header")
+	}
+	if strings.Contains(result, "old auto fact 1") {
+		t.Error("old auto content should be replaced by consolidated version")
+	}
+	if strings.Contains(result, "See [auto-") {
+		t.Error("auto-*.md pointer lines should be removed")
+	}
+
+	// Marker file should be updated
+	if _, err := os.Stat(filepath.Join(dir, ".memory_gc")); os.IsNotExist(err) {
+		t.Error(".memory_gc marker should exist")
+	}
+}
+
+func TestConsolidateMemory_LLMReturnsNONE(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("- user fact\n"), 0644)
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("auto-2026-03-%02d-%06x.md", i+1, i)
+		os.WriteFile(filepath.Join(dir, name), []byte(fmt.Sprintf("- stale %d\n", i)), 0644)
+	}
+
+	// Set marker to 8 days ago so cooldown passes explicitly
+	markerPath := filepath.Join(dir, ".memory_gc")
+	os.WriteFile(markerPath, []byte(""), 0644)
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	os.Chtimes(markerPath, oldTime, oldTime)
+
+	mock := &mockCompleter{
+		response: &client.CompletionResponse{OutputText: "NONE"},
+	}
+
+	err := ConsolidateMemory(context.Background(), mock, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// MEMORY.md should only have user content
+	data, _ := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	result := string(data)
+	if !strings.Contains(result, "user fact") {
+		t.Error("user content should be preserved")
+	}
+	if strings.Contains(result, "Auto-consolidated") {
+		t.Error("should not have auto section when LLM returned NONE")
+	}
+}
+
+func TestSplitMemory(t *testing.T) {
+	input := "- user fact 1\n- user fact 2\n\n" +
+		"## Auto-persisted (2026-03-01 10:00)\n\n- auto fact 1\n- auto fact 2\n\n" +
+		"- [2026-03-01] See [auto-2026-03-01-aaaaaa.md](auto-2026-03-01-aaaaaa.md) for details\n"
+
+	user, auto := splitMemory(input)
+
+	if !strings.Contains(user, "user fact 1") {
+		t.Error("user content should contain user fact 1")
+	}
+	if !strings.Contains(user, "user fact 2") {
+		t.Error("user content should contain user fact 2")
+	}
+	if strings.Contains(user, "auto fact") {
+		t.Error("user content should not contain auto facts")
+	}
+	if strings.Contains(user, "See [auto-") {
+		t.Error("user content should not contain pointer lines")
+	}
+	if !strings.Contains(auto, "auto fact 1") {
+		t.Error("auto content should contain auto fact 1")
+	}
+	if !strings.Contains(auto, "See [auto-") {
+		t.Error("auto content should contain pointer lines")
+	}
+}
+
+func TestSplitMemory_NoAutoContent(t *testing.T) {
+	input := "- user fact 1\n- user fact 2\n"
+	user, auto := splitMemory(input)
+
+	if !strings.Contains(user, "user fact 1") {
+		t.Error("user content should contain user fact 1")
+	}
+	if auto != "" {
+		t.Errorf("auto content should be empty, got %q", auto)
+	}
+}
+
+func TestSplitMemory_OnlyAutoContent(t *testing.T) {
+	input := "## Auto-persisted (2026-03-01 10:00)\n\n- auto fact 1\n"
+	user, auto := splitMemory(input)
+
+	if user != "" {
+		t.Errorf("user content should be empty, got %q", user)
+	}
+	if !strings.Contains(auto, "auto fact 1") {
+		t.Error("auto content should contain auto fact 1")
+	}
 }

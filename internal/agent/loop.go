@@ -364,6 +364,14 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		basePrompt = a.agentBasePrompt
 	}
 
+	// Memory consolidation: merge auto-*.md detail files when accumulated.
+	// Runs at most once per 7 days, only when ≥12 detail files exist.
+	if a.memoryDir != "" {
+		if gcErr := ctxwin.ConsolidateMemory(ctx, a.client, a.memoryDir); gcErr != nil {
+			fmt.Fprintf(os.Stderr, "[context] memory consolidation failed: %v\n", gcErr)
+		}
+	}
+
 	// Re-read memory from disk each Run() so writes from the agent
 	// or write-before-compact are picked up in long-lived sessions.
 	var mem string

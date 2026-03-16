@@ -20,6 +20,25 @@ const (
 	// Exceeding this triggers overflow to a detail file.
 	maxMemoryLines = 150
 
+	// consolidateThreshold is the minimum number of auto-*.md files before GC runs.
+	consolidateThreshold = 12
+	// consolidateCooldown is the minimum time between consolidation runs.
+	consolidateCooldown = 7 * 24 * time.Hour
+
+	consolidatePrompt = `You are consolidating an AI agent's auto-persisted memory entries.
+
+These entries were extracted automatically from past conversations. Many are duplicated or superseded by newer entries.
+
+Merge them into a single clean list:
+- Deduplicate facts that say the same thing
+- When entries conflict, keep the most recent version
+- Drop ephemeral or stale information no longer useful
+- Keep: decisions, preferences, patterns, gotchas, references, contacts, people
+
+Output a markdown bulleted list, one fact per bullet (max ~100 chars each).
+Target: under 100 lines total.
+If nothing worth keeping survives, return exactly "NONE".`
+
 	persistPrompt = `You are extracting durable knowledge from a conversation before context is compacted.
 
 Review the conversation and identify facts worth remembering in FUTURE conversations. Focus on:
@@ -197,4 +216,163 @@ func countLines(content []byte) int {
 		n++ // last line without trailing newline
 	}
 	return n
+}
+
+// ConsolidateMemory merges auto-persisted detail files and auto sections in
+// MEMORY.md into a single deduplicated block via an LLM call. User-written
+// memory is preserved verbatim.
+// Runs only when ≥12 auto-*.md files exist and last GC was ≥7 days ago.
+// Safe for concurrent use (flock on MEMORY.md.lock).
+func ConsolidateMemory(ctx context.Context, c Completer, memoryDir string) error {
+	if memoryDir == "" {
+		return nil
+	}
+
+	// Check threshold: need ≥12 auto-*.md files
+	autoFiles, err := filepath.Glob(filepath.Join(memoryDir, "auto-*.md"))
+	if err != nil || len(autoFiles) < consolidateThreshold {
+		return nil
+	}
+
+	// Check cooldown: skip if .memory_gc was touched < 7 days ago
+	markerPath := filepath.Join(memoryDir, ".memory_gc")
+	if info, err := os.Stat(markerPath); err == nil {
+		if time.Since(info.ModTime()) < consolidateCooldown {
+			return nil
+		}
+	}
+
+	// Acquire flock (same lock as BoundedAppend)
+	memoryPath := filepath.Join(memoryDir, "MEMORY.md")
+	lockPath := memoryPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("consolidate: open lock: %w", err)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("consolidate: flock: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+
+	// Read and split MEMORY.md into user vs auto content
+	existing, _ := os.ReadFile(memoryPath)
+	userContent, autoFromMemory := splitMemory(string(existing))
+
+	// Read all auto-*.md file contents
+	var autoContent strings.Builder
+	var consumedFiles []string
+	if autoFromMemory != "" {
+		autoContent.WriteString(autoFromMemory)
+		autoContent.WriteString("\n\n")
+	}
+	for _, f := range autoFiles {
+		data, readErr := os.ReadFile(f)
+		if readErr != nil {
+			continue
+		}
+		consumedFiles = append(consumedFiles, f)
+		autoContent.WriteString(string(data))
+		autoContent.WriteString("\n")
+	}
+
+	if autoContent.Len() == 0 {
+		return nil
+	}
+
+	// LLM consolidation call
+	if c == nil {
+		return nil // no completer (skip-logic tests)
+	}
+
+	req := client.CompletionRequest{
+		Messages: []client.Message{
+			{Role: "system", Content: client.NewTextContent(consolidatePrompt)},
+			{Role: "user", Content: client.NewTextContent(autoContent.String())},
+		},
+		ModelTier:   "small",
+		Temperature: 0.2,
+		MaxTokens:   2000,
+	}
+
+	resp, err := c.Complete(ctx, req)
+	if err != nil {
+		return fmt.Errorf("consolidate: LLM call failed: %w", err)
+	}
+
+	consolidated := strings.TrimSpace(resp.OutputText)
+
+	// Rebuild MEMORY.md: user content + consolidated auto section
+	var result strings.Builder
+	if userContent != "" {
+		result.WriteString(userContent)
+	}
+	if consolidated != "" && !strings.EqualFold(consolidated, "NONE") {
+		if result.Len() > 0 {
+			result.WriteString("\n\n")
+		}
+		timestamp := time.Now().Format("2006-01-02 15:04")
+		fmt.Fprintf(&result, "## Auto-consolidated (%s)\n\n%s\n", timestamp, consolidated)
+	}
+
+	// Atomic write: temp file + rename
+	tmpPath := memoryPath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(result.String()), 0644); err != nil {
+		return fmt.Errorf("consolidate: write temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, memoryPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("consolidate: rename: %w", err)
+	}
+
+	// Delete consumed auto-*.md files
+	for _, f := range consumedFiles {
+		os.Remove(f)
+	}
+
+	// Touch marker
+	os.WriteFile(markerPath, []byte(time.Now().Format(time.RFC3339)), 0644) //nolint:errcheck
+
+	return nil
+}
+
+// splitMemory separates MEMORY.md content into user-written lines and
+// auto-persisted lines. Auto content starts at "## Auto-persisted" or
+// "## Auto-consolidated" headers, and includes "See [auto-" pointer lines.
+// Returns trimmed strings for each section.
+func splitMemory(content string) (userContent, autoContent string) {
+	lines := strings.Split(content, "\n")
+	var user, auto []string
+	inAuto := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Detect auto section headers
+		if strings.HasPrefix(trimmed, "## Auto-persisted") || strings.HasPrefix(trimmed, "## Auto-consolidated") {
+			inAuto = true
+			auto = append(auto, line)
+			continue
+		}
+
+		// Detect auto-*.md pointer lines anywhere
+		if strings.Contains(trimmed, "See [auto-") && strings.Contains(trimmed, ".md]") {
+			auto = append(auto, line)
+			continue
+		}
+
+		// A new non-auto ## header ends the auto section
+		if inAuto && strings.HasPrefix(trimmed, "## ") {
+			inAuto = false
+		}
+
+		if inAuto {
+			auto = append(auto, line)
+		} else {
+			user = append(user, line)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(user, "\n")),
+		strings.TrimSpace(strings.Join(auto, "\n"))
 }
