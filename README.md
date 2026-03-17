@@ -1,4 +1,4 @@
-# Shannon CLI (`shan`)
+# ShanClaw (`shan`)
 
 Interactive AI agent CLI powered by Shannon. Named agents with independent instructions/memory, local tools for computer control, MCP client for third-party integrations (GitHub, Slack, databases, etc.), daemon mode for channel messaging (Slack, Telegram, LINE), local scheduled tasks via launchd, and remote research/swarm orchestration via the Gateway API. macOS focused.
 
@@ -55,7 +55,7 @@ npm update -g @kocoro/shanclaw  # if installed via npm (re-runs postinstall to f
 
 ## Setup
 
-Shannon CLI requires a Gateway API for LLM completions and remote tools.
+ShanClaw requires a Gateway API for LLM completions and remote tools.
 
 **Option A: Shannon Cloud** — get an API key from [shannon.run](https://shannon.run):
 
