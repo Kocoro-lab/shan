@@ -32,7 +32,9 @@ type RunAgentRequest struct {
 	Sender     string `json:"sender,omitempty"`    // user identifier from channel
 	Channel    string `json:"channel,omitempty"`   // channel/thread source context
 	ThreadID   string `json:"thread_id,omitempty"` // thread context for messaging platforms
-	RouteKey   string `json:"-"`                   // internal routing key
+	RouteKey      string `json:"-"`                   // internal routing key
+	Ephemeral     bool   `json:"-"`                   // caller owns persistence + events
+	ModelOverride string `json:"-"`                   // overrides agent model tier
 }
 
 // Validate checks that the request has the minimum required fields.
@@ -285,18 +287,21 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 	// Persist session to disk before loop.Run() so there's a record even if
 	// the daemon crashes mid-execution. The final save after completion is
 	// still needed to capture the assistant's reply.
-	if req.Source != "" && req.Channel != "" {
-		sess.Source = req.Source
-		sess.Channel = req.Channel
-	}
-	if sess.Title == "New session" && req.RouteKey != "" {
-		title := routeTitle(req.Source, req.Channel)
-		if title != "" {
-			sess.Title = title
+	// Ephemeral requests skip persistence — the caller owns session lifecycle.
+	if !req.Ephemeral {
+		if req.Source != "" && req.Channel != "" {
+			sess.Source = req.Source
+			sess.Channel = req.Channel
 		}
-	}
-	if err := sessMgr.Save(); err != nil {
-		log.Printf("daemon: failed to pre-save session: %v", err)
+		if sess.Title == "New session" && req.RouteKey != "" {
+			title := routeTitle(req.Source, req.Channel)
+			if title != "" {
+				sess.Title = title
+			}
+		}
+		if err := sessMgr.Save(); err != nil {
+			log.Printf("daemon: failed to pre-save session: %v", err)
+		}
 	}
 
 	history := sess.Messages
@@ -377,6 +382,9 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 			loop.SetContextWindow(*ac.ContextWindow)
 		}
 	}
+	if req.ModelOverride != "" {
+		loop.SetModelTier(req.ModelOverride)
+	}
 	// Inject session metadata as sticky context so it survives compaction.
 	if req.Source != "" || req.Channel != "" || req.Sender != "" {
 		var parts []string
@@ -418,60 +426,63 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 		return nil, fmt.Errorf("agent error for %s: %w", agentName, runErr)
 	}
 
-	// Set title from first user message (named agents get a fixed title).
-	if sess.Title == "New session" {
-		if agentName != "" {
-			sess.Title = session.AgentTitle(agentName)
-		} else {
-			sess.Title = session.Title(prompt)
+	// Ephemeral requests skip post-run persistence — the caller owns session lifecycle.
+	if !req.Ephemeral {
+		// Set title from first user message (named agents get a fixed title).
+		if sess.Title == "New session" {
+			if agentName != "" {
+				sess.Title = session.AgentTitle(agentName)
+			} else {
+				sess.Title = session.Title(prompt)
+			}
 		}
-	}
 
-	// Append the turn to the session and persist.
-	source := req.Source
-	if source == "" {
-		source = "unknown"
-	}
-	sess.Messages = append(sess.Messages,
-		client.Message{Role: "user", Content: client.NewTextContent(prompt)},
-	)
-	sess.MessageMeta = append(sess.MessageMeta,
-		session.MessageMeta{Source: source},
-	)
-	// Persist any messages injected mid-run (HITL follow-ups).
-	for _, injMsg := range loop.InjectedMessages() {
+		// Append the turn to the session and persist.
+		source := req.Source
+		if source == "" {
+			source = "unknown"
+		}
 		sess.Messages = append(sess.Messages,
-			client.Message{Role: "user", Content: client.NewTextContent(injMsg)},
+			client.Message{Role: "user", Content: client.NewTextContent(prompt)},
 		)
 		sess.MessageMeta = append(sess.MessageMeta,
 			session.MessageMeta{Source: source},
 		)
-	}
-	sess.Messages = append(sess.Messages,
-		client.Message{Role: "assistant", Content: client.NewTextContent(result)},
-	)
-	sess.MessageMeta = append(sess.MessageMeta,
-		session.MessageMeta{Source: source},
-	)
-	if err := sessMgr.Save(); err != nil {
-		log.Printf("daemon: failed to save session: %v", err)
-		if deps.EventBus != nil {
-			payload, _ := json.Marshal(map[string]string{
-				"agent": agentName,
-				"error": fmt.Sprintf("session save failed: %v", err),
-			})
-			deps.EventBus.Emit(Event{Type: EventAgentError, Payload: payload})
+		// Persist any messages injected mid-run (HITL follow-ups).
+		for _, injMsg := range loop.InjectedMessages() {
+			sess.Messages = append(sess.Messages,
+				client.Message{Role: "user", Content: client.NewTextContent(injMsg)},
+			)
+			sess.MessageMeta = append(sess.MessageMeta,
+				session.MessageMeta{Source: source},
+			)
 		}
-	}
+		sess.Messages = append(sess.Messages,
+			client.Message{Role: "assistant", Content: client.NewTextContent(result)},
+		)
+		sess.MessageMeta = append(sess.MessageMeta,
+			session.MessageMeta{Source: source},
+		)
+		if err := sessMgr.Save(); err != nil {
+			log.Printf("daemon: failed to save session: %v", err)
+			if deps.EventBus != nil {
+				payload, _ := json.Marshal(map[string]string{
+					"agent": agentName,
+					"error": fmt.Sprintf("session save failed: %v", err),
+				})
+				deps.EventBus.Emit(Event{Type: EventAgentError, Payload: payload})
+			}
+		}
 
-	if deps.EventBus != nil {
-		payload, _ := json.Marshal(map[string]any{
-			"agent":      agentName,
-			"source":     req.Source,
-			"session_id": sess.ID,
-			"text":       result,
-		})
-		deps.EventBus.Emit(Event{Type: EventAgentReply, Payload: payload})
+		if deps.EventBus != nil {
+			payload, _ := json.Marshal(map[string]any{
+				"agent":      agentName,
+				"source":     req.Source,
+				"session_id": sess.ID,
+				"text":       result,
+			})
+			deps.EventBus.Emit(Event{Type: EventAgentReply, Payload: payload})
+		}
 	}
 
 	log.Printf("daemon: reply to %s (%d tokens, $%.4f)", agentName, usage.TotalTokens, usage.CostUSD)

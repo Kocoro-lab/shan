@@ -40,6 +40,28 @@ func TestRunAgentRequest_Validate_WithSessionID(t *testing.T) {
 	}
 }
 
+func TestRunAgentRequest_Ephemeral(t *testing.T) {
+	req := RunAgentRequest{
+		Text:      "test",
+		Agent:     "test-agent",
+		Source:    "heartbeat",
+		Ephemeral: true,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("valid ephemeral request should not fail: %v", err)
+	}
+}
+
+func TestRunAgentRequest_ModelOverride(t *testing.T) {
+	req := RunAgentRequest{
+		Text:          "test",
+		ModelOverride: "small",
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("valid model override request should not fail: %v", err)
+	}
+}
+
 func TestRunAgentRequestSource(t *testing.T) {
 	req := RunAgentRequest{
 		Text:   "hello",
