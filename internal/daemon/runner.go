@@ -280,8 +280,9 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 			sessMgr.NewSession()
 		}
 	case strings.HasPrefix(req.RouteKey, "agent:"):
-		// Named-agent routes preserve manager-loaded current session across restarts.
-		if sessMgr.Current() == nil || sessMgr.Current().ID == "" {
+		// Named-agent cold start (first run or after daemon restart).
+		// route.sessionID is empty — resume latest from disk, or start fresh if none.
+		if _, err := sessMgr.ResumeLatest(); err != nil || sessMgr.Current() == nil {
 			sessMgr.NewSession()
 		}
 	default:
@@ -298,7 +299,9 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 			sess.Source = req.Source
 			sess.Channel = req.Channel
 		}
-		if sess.Title == "New session" && req.RouteKey != "" {
+		// Only set source-derived title for non-named-agent routes.
+		// Named agents always get session.AgentTitle in the post-loop block.
+		if sess.Title == "New session" && req.RouteKey != "" && !strings.HasPrefix(req.RouteKey, "agent:") {
 			title := routeTitle(req.Source, req.Channel)
 			if title != "" {
 				sess.Title = title

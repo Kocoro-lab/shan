@@ -187,8 +187,8 @@ func (m *Manager) tick(ctx context.Context, ah *agentHeartbeat) {
 		Agent:         ah.name,
 		Source:        "heartbeat",
 		Text:          prompt,
-		NewSession:    ah.isolatedSession,
-		Ephemeral:     true,
+		NewSession:    ah.isolatedSession, // Ephemeral=true below means no disk write regardless;
+		Ephemeral:     true,               // isolated heartbeats intentionally run without history.
 		ModelOverride: ah.model,
 	}
 

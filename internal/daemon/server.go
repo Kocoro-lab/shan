@@ -439,6 +439,15 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if req.Source == "" {
 		req.Source = "shanclaw"
 	}
+	// Normalize "default" → "" early so downstream guards are consistent.
+	if req.Agent == "default" {
+		req.Agent = ""
+	}
+	// Named agents always resume their single long-lived session.
+	// Clear new_session so clients cannot fork a named agent's context.
+	if req.Agent != "" {
+		req.NewSession = false
+	}
 	req.EnsureRouteKey()
 	if err := req.Validate(); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)

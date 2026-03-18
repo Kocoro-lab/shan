@@ -131,12 +131,14 @@ func (s *Scheduler) EvaluateDue(now time.Time) []schedule.Schedule {
 // runSchedule fires a single scheduled agent run.
 func (s *Scheduler) runSchedule(ctx context.Context, sched schedule.Schedule) {
 	req := RunAgentRequest{
-		Text:       sched.Prompt,
-		Agent:      sched.Agent,
-		Source:     ChannelSchedule,
-		Channel:    ChannelSchedule + "-" + sched.ID,
-		Sender:     "scheduler",
-		NewSession: true,
+		Text:    sched.Prompt,
+		Agent:   sched.Agent,
+		Source:  ChannelSchedule,
+		Channel: ChannelSchedule + "-" + sched.ID,
+		Sender:  "scheduler",
+		// Named agents resume their single long-lived session.
+		// Default agent (no name) gets a fresh session per run.
+		NewSession: sched.Agent == "",
 	}
 	_, err := RunAgent(ctx, s.deps, req, &scheduleHandler{})
 	if err != nil {
