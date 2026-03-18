@@ -8,7 +8,7 @@ import (
 
 func TestCreateAndList(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, err := mgr.Create("ops-bot", "0 9 * * *", "check prod health")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -33,7 +33,7 @@ func TestCreateAndList(t *testing.T) {
 
 func TestCreateRejectsInvalidCron(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	_, err := mgr.Create("bot", "not-a-cron", "task")
 	if err == nil {
 		t.Fatal("expected error for invalid cron")
@@ -42,7 +42,7 @@ func TestCreateRejectsInvalidCron(t *testing.T) {
 
 func TestCreateRejectsInvalidAgentName(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	_, err := mgr.Create("../evil", "0 9 * * *", "task")
 	if err == nil {
 		t.Fatal("expected error for invalid agent name")
@@ -51,7 +51,7 @@ func TestCreateRejectsInvalidAgentName(t *testing.T) {
 
 func TestCreateAcceptsEmptyAgent(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, err := mgr.Create("", "0 9 * * *", "task")
 	if err != nil {
 		t.Fatalf("Create with empty agent: %v", err)
@@ -65,7 +65,7 @@ func TestCreateAcceptsEmptyAgent(t *testing.T) {
 
 func TestCreateSupportsCronSyntax(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	crons := []string{
 		"*/5 * * * *",
 		"0 9-17 * * 1-5",
@@ -82,7 +82,7 @@ func TestCreateSupportsCronSyntax(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, _ := mgr.Create("bot", "0 9 * * *", "task")
 	err := mgr.Remove(id)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestRemove(t *testing.T) {
 
 func TestRemoveNotFound(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	err := mgr.Remove("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent id")
@@ -105,7 +105,7 @@ func TestRemoveNotFound(t *testing.T) {
 
 func TestUpdate(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, _ := mgr.Create("bot", "0 9 * * *", "old prompt")
 	err := mgr.Update(id, &UpdateOpts{Prompt: strPtr("new prompt")})
 	if err != nil {
@@ -119,7 +119,7 @@ func TestUpdate(t *testing.T) {
 
 func TestUpdateRejectsInvalidCron(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, _ := mgr.Create("bot", "0 9 * * *", "task")
 	bad := "not-valid"
 	err := mgr.Update(id, &UpdateOpts{Cron: &bad})
@@ -130,7 +130,7 @@ func TestUpdateRejectsInvalidCron(t *testing.T) {
 
 func TestEnableDisable(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	id, _ := mgr.Create("bot", "0 9 * * *", "task")
 	if err := mgr.Update(id, &UpdateOpts{Enabled: boolPtr(false)}); err != nil {
 		t.Fatalf("Disable: %v", err)
@@ -143,14 +143,12 @@ func TestEnableDisable(t *testing.T) {
 
 func TestConcurrentCreates(t *testing.T) {
 	dir := t.TempDir()
-	mgr := NewManager(filepath.Join(dir, "schedules.json"), dir)
+	mgr := NewManager(filepath.Join(dir, "schedules.json"))
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Create may return plist sync errors (launchctl fails in test env)
-			// but the schedule entry should still be written to the index.
 			mgr.Create("bot", "0 9 * * *", "task")
 		}()
 	}

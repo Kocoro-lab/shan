@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,8 +15,6 @@ import (
 	"github.com/Kocoro-lab/ShanClaw/internal/agents"
 	"github.com/adhocore/gronx"
 )
-
-const plistPrefix = "com.shannon.schedule"
 
 type Schedule struct {
 	ID         string    `json:"id"`
@@ -36,68 +34,16 @@ type UpdateOpts struct {
 
 type Manager struct {
 	indexPath string
-	plistDir  string
 }
 
-func NewManager(indexPath, plistDir string) *Manager {
-	return &Manager{indexPath: indexPath, plistDir: plistDir}
-}
-
-// plistPath returns the plist path scoped to this Manager's plistDir.
-// In production, plistDir is ~/Library/LaunchAgents. In tests, it's a temp dir.
-func (m *Manager) plistPath(id string) string {
-	return filepath.Join(m.plistDir, plistPrefix+"."+id+".plist")
+func NewManager(indexPath string) *Manager {
+	return &Manager{indexPath: indexPath}
 }
 
 func validateCron(expr string) error {
 	g := gronx.New()
 	if !g.IsValid(expr) {
 		return fmt.Errorf("invalid cron expression: %q", expr)
-	}
-	if err := ValidateCronComplexity(expr); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ValidateCronComplexity checks that a cron expression doesn't produce too many
-// launchd CalendarInterval combinations. Step expressions (*/N) are always fine.
-func ValidateCronComplexity(expr string) error {
-	fields := strings.Fields(expr)
-	if len(fields) != 5 {
-		return nil // will be caught by gronx
-	}
-	// Step expressions use StartInterval — no combination limit
-	for _, f := range fields {
-		if strings.Contains(f, "/") {
-			return nil
-		}
-	}
-	// Count total combinations
-	total := 1
-	for _, field := range fields {
-		if field == "*" {
-			continue
-		}
-		count := 0
-		for _, part := range strings.Split(field, ",") {
-			part = strings.TrimSpace(part)
-			if strings.Contains(part, "-") {
-				bounds := strings.SplitN(part, "-", 2)
-				lo, err1 := strconv.Atoi(bounds[0])
-				hi, err2 := strconv.Atoi(bounds[1])
-				if err1 != nil || err2 != nil {
-					return nil // gronx will catch syntax errors
-				}
-				count += hi - lo + 1
-			} else {
-				count++
-			}
-		}
-		total *= count
-		if total > 512 {
-			return fmt.Errorf("cron expression %q produces too many combinations (%d+) for launchd; simplify or use step syntax (*/N)", expr, total)
-		}
 	}
 	return nil
 }
@@ -217,7 +163,7 @@ func (m *Manager) Create(agentName, cron, prompt string) (string, error) {
 	id := generateScheduleID()
 	s := Schedule{
 		ID: id, Agent: agentName, Cron: cron, Prompt: prompt,
-		Enabled: true, SyncStatus: "pending", CreatedAt: time.Now(),
+		Enabled: true, SyncStatus: "ok", CreatedAt: time.Now(),
 	}
 	err := m.lockedModify(func(schedules []Schedule) ([]Schedule, error) {
 		return append(schedules, s), nil
@@ -225,20 +171,6 @@ func (m *Manager) Create(agentName, cron, prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	// Generate and load plist
-	plist := GeneratePlist(id, agentName, cron, prompt, ShanBinary())
-	plistPath := m.plistPath(id)
-	if err := WritePlist(plistPath, plist); err != nil {
-		m.SetSyncStatus(id, "failed")
-		return id, fmt.Errorf("schedule created but plist write failed: %w", err)
-	}
-	if err := LaunchctlLoad(plistPath); err != nil {
-		m.SetSyncStatus(id, "failed")
-		return id, fmt.Errorf("schedule created but launchctl load failed: %w", err)
-	}
-	m.SetSyncStatus(id, "ok")
-
 	return id, nil
 }
 
@@ -273,7 +205,7 @@ func (m *Manager) Update(id string, opts *UpdateOpts) error {
 			return err
 		}
 	}
-	err := m.lockedModify(func(schedules []Schedule) ([]Schedule, error) {
+	return m.lockedModify(func(schedules []Schedule) ([]Schedule, error) {
 		for i, s := range schedules {
 			if s.ID == id {
 				if opts.Cron != nil {
@@ -285,46 +217,14 @@ func (m *Manager) Update(id string, opts *UpdateOpts) error {
 				if opts.Enabled != nil {
 					schedules[i].Enabled = *opts.Enabled
 				}
-				schedules[i].SyncStatus = "pending"
 				return schedules, nil
 			}
 		}
 		return nil, fmt.Errorf("schedule %q not found", id)
 	})
-	if err != nil {
-		return err
-	}
-
-	// Resync plist after update
-	s, getErr := m.Get(id)
-	if getErr != nil {
-		return nil // index updated, plist sync can happen via `shan schedule sync`
-	}
-	plistPath := m.plistPath(id)
-	if s.Enabled {
-		plist := GeneratePlist(id, s.Agent, s.Cron, s.Prompt, ShanBinary())
-		LaunchctlUnload(plistPath)
-		if err := WritePlist(plistPath, plist); err != nil {
-			m.SetSyncStatus(id, "failed")
-			return nil
-		}
-		if err := LaunchctlLoad(plistPath); err != nil {
-			m.SetSyncStatus(id, "failed")
-			return nil
-		}
-	} else {
-		LaunchctlUnload(plistPath)
-	}
-	m.SetSyncStatus(id, "ok")
-	return nil
 }
 
 func (m *Manager) Remove(id string) error {
-	// Unload and remove plist before modifying index (best-effort)
-	plistPath := m.plistPath(id)
-	LaunchctlUnload(plistPath)
-	RemovePlist(plistPath)
-
 	return m.lockedModify(func(schedules []Schedule) ([]Schedule, error) {
 		filtered := make([]Schedule, 0, len(schedules))
 		found := false
@@ -343,46 +243,13 @@ func (m *Manager) Remove(id string) error {
 }
 
 func (m *Manager) SetSyncStatus(id, status string) error {
-	return m.lockedModify(func(schedules []Schedule) ([]Schedule, error) {
-		for i, s := range schedules {
-			if s.ID == id {
-				schedules[i].SyncStatus = status
-				return schedules, nil
-			}
-		}
-		return schedules, nil
-	})
+	log.Printf("schedule: SetSyncStatus is deprecated (no-op)")
+	return nil
 }
 
 func (m *Manager) Sync() (int, error) {
-	schedules, err := m.load()
-	if err != nil {
-		return 0, err
-	}
-	synced := 0
-	for _, s := range schedules {
-		if s.SyncStatus == "ok" {
-			continue
-		}
-		if !s.Enabled {
-			LaunchctlUnload(m.plistPath(s.ID))
-			m.SetSyncStatus(s.ID, "ok")
-			synced++
-			continue
-		}
-		plist := GeneratePlist(s.ID, s.Agent, s.Cron, s.Prompt, ShanBinary())
-		plistPath := m.plistPath(s.ID)
-		if err := WritePlist(plistPath, plist); err != nil {
-			continue
-		}
-		LaunchctlUnload(plistPath)
-		if err := LaunchctlLoad(plistPath); err != nil {
-			continue
-		}
-		m.SetSyncStatus(s.ID, "ok")
-		synced++
-	}
-	return synced, nil
+	log.Printf("schedule: Sync is deprecated (no-op)")
+	return 0, nil
 }
 
 func generateScheduleID() string {
