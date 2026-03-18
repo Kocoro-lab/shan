@@ -1,6 +1,6 @@
 {
   "name": "@kocoro/shanclaw",
-  "version": "0.2.5",
+  "version": "0.0.2",
   "description": "AI-powered CLI agent with local tools, permissions, and session management",
   "bin": {
     "shan": "bin/shan"
