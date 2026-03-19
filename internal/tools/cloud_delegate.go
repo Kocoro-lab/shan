@@ -14,14 +14,21 @@ import (
 // Used by daemon mode to send progress with workflow_id for streaming card replies.
 type OnWorkflowStartedFunc func(workflowID string)
 
+type contextKeyWorkflowStarted struct{}
+
+// WithOnWorkflowStarted returns a context carrying a per-request workflow started callback.
+// This is safe for concurrent use (each message gets its own context).
+func WithOnWorkflowStarted(ctx context.Context, fn OnWorkflowStartedFunc) context.Context {
+	return context.WithValue(ctx, contextKeyWorkflowStarted{}, fn)
+}
+
 type CloudDelegateTool struct {
-	gw                 *client.GatewayClient
-	apiKey             string
-	timeout            time.Duration
-	handler            agent.EventHandler
-	agentName          string
-	agentPrompt        string
-	onWorkflowStarted OnWorkflowStartedFunc
+	gw          *client.GatewayClient
+	apiKey      string
+	timeout     time.Duration
+	handler     agent.EventHandler
+	agentName   string
+	agentPrompt string
 }
 
 type cloudDelegateArgs struct {
@@ -45,11 +52,6 @@ func NewCloudDelegateTool(gw *client.GatewayClient, apiKey string, timeout time.
 // at registration time (e.g., TUI creates handler per-run).
 func (t *CloudDelegateTool) SetHandler(h agent.EventHandler) {
 	t.handler = h
-}
-
-// SetOnWorkflowStarted sets the callback invoked when Cloud returns a workflow_id.
-func (t *CloudDelegateTool) SetOnWorkflowStarted(fn OnWorkflowStartedFunc) {
-	t.onWorkflowStarted = fn
 }
 
 // SetAgentContext updates the agent identity forwarded to Shannon Cloud.
@@ -143,8 +145,10 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 	}
 
 	// Notify daemon of workflow_id so Cloud can start streaming card replies
-	if t.onWorkflowStarted != nil && resp.WorkflowID != "" {
-		t.onWorkflowStarted(resp.WorkflowID)
+	if resp.WorkflowID != "" {
+		if fn, ok := ctx.Value(contextKeyWorkflowStarted{}).(OnWorkflowStartedFunc); ok && fn != nil {
+			fn(resp.WorkflowID)
+		}
 	}
 
 	// Resolve stream URL
