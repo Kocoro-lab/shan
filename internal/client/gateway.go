@@ -236,6 +236,7 @@ type CompletionRequest struct {
 	// Provider-specific parameters (passed through to gateway)
 	Thinking        *ThinkingConfig `json:"thinking,omitempty"`
 	ReasoningEffort string          `json:"reasoning_effort,omitempty"` // OpenAI o-models: minimal/low/medium/high
+	ToolChoice      any             `json:"tool_choice,omitempty"`      // nil=auto, "any", or {"type":"tool","name":"..."}
 }
 
 // ThinkingConfig for Anthropic extended thinking.

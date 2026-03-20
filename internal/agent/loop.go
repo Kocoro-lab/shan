@@ -589,6 +589,16 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 			Thinking:        a.thinking,
 			ReasoningEffort: a.reasoningEffort,
 		}
+
+		// First-turn forced tool use: on the very first iteration, force the model
+		// to call at least one tool (including "think") before emitting text.
+		// This prevents the model from answering action requests purely from
+		// training knowledge without grounding in tool results.
+		// Incompatible with extended thinking, so temporarily clear it for this call.
+		if i == 0 && len(toolSchemas) > 0 {
+			req.ToolChoice = map[string]string{"type": "any"}
+			req.Thinking = nil
+		}
 		if a.enableStreaming && a.handler != nil {
 			resp, err = a.client.CompleteStream(ctx, req, func(delta client.StreamDelta) {
 				a.handler.OnStreamDelta(delta.Text)
@@ -622,12 +632,28 @@ func (a *AgentLoop) Run(ctx context.Context, userMessage string, history []clien
 		// Handle text-only responses (no tool calls).
 		// Text-only always means "done" — the model uses the think tool
 		// to signal planning/continuation, so we never need to guess.
+		// Exception 0: first-turn forced tool use failed (gateway may not support
+		//   tool_choice), retry once with a nudge and thinking restored.
 		// Exception 1: after a checkpoint injection, allow one continuation.
 		// Exception 2: hallucination detection — if the model claims results without
 		// tool calls and we've had tool calls before, nudge it to verify.
 		if !resp.HasToolCalls() {
 			if resp.OutputText != "" {
 				lastText = resp.OutputText
+			}
+
+			// First-turn fallback: if tool_choice was set but model still didn't
+			// call any tools, retry once with an explicit instruction.
+			if i == 0 && totalToolCalls == 0 && len(toolSchemas) > 0 {
+				messages = append(messages, client.Message{
+					Role:    "assistant",
+					Content: client.NewTextContent(resp.OutputText),
+				})
+				messages = append(messages, client.Message{
+					Role:    "user",
+					Content: client.NewTextContent("You responded without using any tools. Re-read the user's request — if they asked you to perform an action (browse, search, open, read, write, run, etc.), you MUST use the appropriate tool. Do not answer from memory."),
+				})
+				continue
 			}
 
 			// If response was truncated by max_tokens, accumulate the partial text
