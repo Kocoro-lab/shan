@@ -79,6 +79,14 @@ var visualTools = map[string]bool{
 	"screenshot": true, "computer": true, "accessibility": true,
 }
 
+// repeatableGUITools extends visualTools with browser — multi-step browser workflows
+// (navigate → snapshot → click → type → snapshot) naturally use many calls with
+// different actions, so the no-progress fallback should not over-trigger.
+// Topic-based detection (FamilyNoProgress) still catches same-URL loops.
+var repeatableGUITools = map[string]bool{
+	"screenshot": true, "computer": true, "accessibility": true, "browser": true,
+}
+
 // NewLoopDetector creates a detector with production defaults.
 func NewLoopDetector() *LoopDetector {
 	return &LoopDetector{
@@ -88,7 +96,7 @@ func NewLoopDetector() *LoopDetector {
 		exactDupThreshold:    3,
 		sameToolErrThreshold: 4,
 		noProgressThreshold:  8,
-		repeatableTools:      visualTools,
+		repeatableTools:      repeatableGUITools,
 	}
 }
 

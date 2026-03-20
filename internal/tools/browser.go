@@ -306,10 +306,13 @@ func (t *BrowserTool) navigate(_ context.Context, args browserArgs, timeout time
 			t.tabID = resp.TabID
 		}
 
-		// Best-effort content preview — don't fail navigate if text fetch fails
+		// Best-effort content preview — don't fail navigate if text fetch fails.
+		// Only fetch if we have a valid tab ID from this navigation response.
 		var preview string
-		if textResp, err := t.pt.text(ctx, t.tabID, "", 0, false); err == nil {
-			preview = textResp.Text
+		if resp.TabID != "" {
+			if textResp, err := t.pt.text(ctx, resp.TabID, "", 0, false); err == nil {
+				preview = textResp.Text
+			}
 		}
 
 		return agent.ToolResult{Content: formatNavigateResult(resp.URL, resp.Title, preview)}, nil
