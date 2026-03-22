@@ -126,6 +126,9 @@ func (h *mockHandler) OnToolResult(name string, args string, result ToolResult, 
 func (h *mockHandler) OnText(text string)         { h.lastText = text }
 func (h *mockHandler) OnStreamDelta(delta string) {}
 func (h *mockHandler) OnUsage(usage TurnUsage)    {}
+func (h *mockHandler) OnCloudAgent(agentID, status, message string) {}
+func (h *mockHandler) OnCloudProgress(completed, total int)         {}
+func (h *mockHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *mockHandler) OnApprovalNeeded(tool string, args string) bool {
 	h.approvalRequested = true
 	return h.approveResult
@@ -1843,6 +1846,9 @@ func (h *cloudDelegateHandler) OnToolResult(name string, args string, result Too
 func (h *cloudDelegateHandler) OnText(text string)                            {}
 func (h *cloudDelegateHandler) OnStreamDelta(delta string)                    {}
 func (h *cloudDelegateHandler) OnUsage(usage TurnUsage)                       {}
+func (h *cloudDelegateHandler) OnCloudAgent(agentID, status, message string)  {}
+func (h *cloudDelegateHandler) OnCloudProgress(completed, total int)          {}
+func (h *cloudDelegateHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *cloudDelegateHandler) OnApprovalNeeded(tool string, args string) bool { return true }
 
 func TestAgentLoop_CloudDelegateLock(t *testing.T) {

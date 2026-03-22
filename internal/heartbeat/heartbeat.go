@@ -235,4 +235,7 @@ func (h *heartbeatHandler) OnToolResult(name string, args string, result agent.T
 func (h *heartbeatHandler) OnText(text string)                  {}
 func (h *heartbeatHandler) OnStreamDelta(delta string)          {}
 func (h *heartbeatHandler) OnUsage(usage agent.TurnUsage)       {}
+func (h *heartbeatHandler) OnCloudAgent(agentID, status, message string) {}
+func (h *heartbeatHandler) OnCloudProgress(completed, total int)         {}
+func (h *heartbeatHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *heartbeatHandler) OnApprovalNeeded(tool string, args string) bool { return true }

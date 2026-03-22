@@ -599,6 +599,10 @@ func (h *httpEventHandler) OnUsage(usage agent.TurnUsage) {}
 // Threat model: localhost-only, unauthenticated but local-trusted.
 // Permission engine (hard-blocks, denied_commands) runs before this.
 // If daemon ever listens on non-localhost, this MUST require auth.
+func (h *httpEventHandler) OnCloudAgent(agentID, status, message string) {}
+func (h *httpEventHandler) OnCloudProgress(completed, total int)         {}
+func (h *httpEventHandler) OnCloudPlan(planType, content string, needsReview bool) {}
+
 func (h *httpEventHandler) OnApprovalNeeded(tool string, args string) bool {
 	return true
 }
@@ -637,6 +641,35 @@ func (h *sseEventHandler) OnStreamDelta(delta string) {
 }
 
 func (h *sseEventHandler) OnUsage(usage agent.TurnUsage) {}
+
+func (h *sseEventHandler) OnCloudAgent(agentID, status, message string) {
+	data, _ := json.Marshal(map[string]interface{}{
+		"agent_id": agentID,
+		"status":   status,
+		"message":  message,
+	})
+	fmt.Fprintf(h.w, "event: cloud_agent\ndata: %s\n\n", data)
+	h.flusher.Flush()
+}
+
+func (h *sseEventHandler) OnCloudProgress(completed, total int) {
+	data, _ := json.Marshal(map[string]interface{}{
+		"completed": completed,
+		"total":     total,
+	})
+	fmt.Fprintf(h.w, "event: cloud_progress\ndata: %s\n\n", data)
+	h.flusher.Flush()
+}
+
+func (h *sseEventHandler) OnCloudPlan(planType, content string, needsReview bool) {
+	data, _ := json.Marshal(map[string]interface{}{
+		"type":         planType,
+		"content":      content,
+		"needs_review": needsReview,
+	})
+	fmt.Fprintf(h.w, "event: cloud_plan\ndata: %s\n\n", data)
+	h.flusher.Flush()
+}
 
 // OnApprovalNeeded sends an approval request over SSE and blocks until the
 // client responds via POST /approval or the request context is cancelled.

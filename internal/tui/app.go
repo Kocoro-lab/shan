@@ -1676,6 +1676,30 @@ func (h *tuiEventHandler) SetCloudStreaming(enabled bool) {
 
 func (h *tuiEventHandler) OnUsage(usage agent.TurnUsage) {}
 
+func (h *tuiEventHandler) OnCloudAgent(agentID, status, message string) {
+	prefixes := map[string]string{"started": ">", "completed": "+", "thinking": "~", "tool": "?"}
+	p := prefixes[status]
+	if p == "" {
+		p = "-"
+	}
+	h.OnStreamDelta(fmt.Sprintf("  %s %s\n", p, message))
+}
+
+func (h *tuiEventHandler) OnCloudProgress(completed, total int) {
+	h.OnStreamDelta(fmt.Sprintf("  > Tasks: %d/%d done\n", completed, total))
+}
+
+func (h *tuiEventHandler) OnCloudPlan(planType, content string, needsReview bool) {
+	switch planType {
+	case "research_plan":
+		h.OnStreamDelta(fmt.Sprintf("\n--- Research Plan ---\n%s\n", content))
+	case "research_plan_updated":
+		h.OnStreamDelta(fmt.Sprintf("\n--- Updated Research Plan ---\n%s\n", content))
+	case "approved":
+		h.OnStreamDelta("\n[Research plan approved, executing...]\n")
+	}
+}
+
 func (h *tuiEventHandler) OnApprovalNeeded(tool string, args string) bool {
 	// Send approval prompt to the TUI event loop, then block until user responds.
 	// This runs inside a tea.Cmd goroutine so blocking is safe — it won't freeze the UI.

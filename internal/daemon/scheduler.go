@@ -156,4 +156,7 @@ func (h *scheduleHandler) OnToolResult(name string, args string, result agent.To
 func (h *scheduleHandler) OnText(text string)                                    {}
 func (h *scheduleHandler) OnStreamDelta(delta string)                            {}
 func (h *scheduleHandler) OnUsage(usage agent.TurnUsage)                         {}
+func (h *scheduleHandler) OnCloudAgent(agentID, status, message string)          {}
+func (h *scheduleHandler) OnCloudProgress(completed, total int)                  {}
+func (h *scheduleHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *scheduleHandler) OnApprovalNeeded(tool string, args string) bool        { return true }

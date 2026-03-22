@@ -497,6 +497,9 @@ func (h *daemonEventHandler) OnToolResult(name string, args string, result agent
 func (h *daemonEventHandler) OnText(text string)            {}
 func (h *daemonEventHandler) OnStreamDelta(delta string)    {}
 func (h *daemonEventHandler) OnUsage(usage agent.TurnUsage) {}
+func (h *daemonEventHandler) OnCloudAgent(agentID, status, message string) {}
+func (h *daemonEventHandler) OnCloudProgress(completed, total int)         {}
+func (h *daemonEventHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *daemonEventHandler) OnApprovalNeeded(tool string, args string) bool {
 	if h.autoApprove {
 		log.Printf("daemon: auto-approving %s (auto_approve=true)", tool)
@@ -540,6 +543,9 @@ func (h *autoApproveHandler) OnToolResult(name string, args string, result agent
 func (h *autoApproveHandler) OnText(text string)            {}
 func (h *autoApproveHandler) OnStreamDelta(delta string)    {}
 func (h *autoApproveHandler) OnUsage(usage agent.TurnUsage) {}
+func (h *autoApproveHandler) OnCloudAgent(agentID, status, message string) {}
+func (h *autoApproveHandler) OnCloudProgress(completed, total int)         {}
+func (h *autoApproveHandler) OnCloudPlan(planType, content string, needsReview bool) {}
 func (h *autoApproveHandler) OnApprovalNeeded(tool string, args string) bool { return true }
 
 func containsString(slice []string, s string) bool {

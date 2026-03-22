@@ -189,6 +189,9 @@ type EventHandler interface {
 	OnStreamDelta(delta string)
 	OnApprovalNeeded(tool string, args string) bool
 	OnUsage(usage TurnUsage)
+	OnCloudAgent(agentID string, status string, message string)
+	OnCloudProgress(completed int, total int)
+	OnCloudPlan(planType string, content string, needsReview bool)
 }
 
 type AgentLoop struct {

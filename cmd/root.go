@@ -304,6 +304,30 @@ func (h *cliEventHandler) OnStreamDelta(delta string) {
 
 func (h *cliEventHandler) OnUsage(usage agent.TurnUsage) {}
 
+func (h *cliEventHandler) OnCloudAgent(agentID, status, message string) {
+	prefixes := map[string]string{"started": ">", "completed": "+", "thinking": "~", "tool": "?"}
+	p := prefixes[status]
+	if p == "" {
+		p = "-"
+	}
+	fmt.Printf("  %s %s\n", p, message)
+}
+
+func (h *cliEventHandler) OnCloudProgress(completed, total int) {
+	fmt.Printf("  > Tasks: %d/%d done\n", completed, total)
+}
+
+func (h *cliEventHandler) OnCloudPlan(planType, content string, needsReview bool) {
+	switch planType {
+	case "research_plan":
+		fmt.Printf("\n--- Research Plan ---\n%s\n", content)
+	case "research_plan_updated":
+		fmt.Printf("\n--- Updated Research Plan ---\n%s\n", content)
+	case "approved":
+		fmt.Println("\n[Research plan approved, executing...]")
+	}
+}
+
 func (h *cliEventHandler) OnApprovalNeeded(tool string, args string) bool {
 	if h.autoApprove {
 		return true

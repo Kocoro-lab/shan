@@ -211,7 +211,7 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 		case "RESEARCH_PLAN_READY":
 			// Surface the plan to the user, then auto-approve
 			if t.handler != nil && event.Message != "" {
-				t.handler.OnStreamDelta("\n--- Research Plan ---\n" + event.Message + "\n--- Auto-approving ---\n")
+				t.handler.OnCloudPlan("research_plan", event.Message, true)
 			}
 			// Auto-approve so the workflow continues (matches Desktop's autoApprove: "on" default)
 			go t.gw.ApproveReviewPlan(timeoutCtx, resp.WorkflowID)
@@ -219,13 +219,13 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 		case "RESEARCH_PLAN_UPDATED":
 			// Updated plan from feedback — surface to user
 			if t.handler != nil && event.Message != "" {
-				t.handler.OnStreamDelta("\n--- Updated Research Plan ---\n" + event.Message + "\n")
+				t.handler.OnCloudPlan("research_plan_updated", event.Message, false)
 			}
 
 		case "RESEARCH_PLAN_APPROVED":
 			// Plan approved, execution starting
 			if t.handler != nil {
-				t.handler.OnStreamDelta("\n[Research plan approved, executing...]\n")
+				t.handler.OnCloudPlan("approved", "", false)
 			}
 
 		case "APPROVAL_REQUESTED":
@@ -237,15 +237,21 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 
 		// --- Status events — only surface user-facing milestones ---
 		case "AGENT_STARTED":
-			t.streamStatus("  > " + statusMsg(event.AgentID, event.Message, "Agent working..."))
+			if t.handler != nil {
+				t.handler.OnCloudAgent(event.AgentID, "started", statusMsg(event.AgentID, event.Message, "Agent working..."))
+			}
 		case "AGENT_COMPLETED":
-			t.streamStatus("  + " + statusMsg(event.AgentID, event.Message, "Agent completed"))
+			if t.handler != nil {
+				t.handler.OnCloudAgent(event.AgentID, "completed", statusMsg(event.AgentID, event.Message, "Agent completed"))
+			}
 		case "AGENT_THINKING":
-			if len(event.Message) <= 100 {
-				t.streamStatus("  ~ " + statusMsg("", event.Message, "Thinking..."))
+			if len(event.Message) <= 100 && t.handler != nil {
+				t.handler.OnCloudAgent("", "thinking", statusMsg("", event.Message, "Thinking..."))
 			}
 		case "TOOL_INVOKED", "TOOL_STARTED":
-			t.streamStatus("  ? " + statusMsg("", event.Message, "Calling tool..."))
+			if t.handler != nil {
+				t.handler.OnCloudAgent("", "tool", statusMsg("", event.Message, "Calling tool..."))
+			}
 
 		// --- Internal plumbing — silently ignore ---
 		case "WORKFLOW_STARTED", "TOOL_OBSERVATION", "TOOL_COMPLETED",
@@ -268,7 +274,9 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 							}
 						}
 					}
-					t.streamStatus(fmt.Sprintf("  > Tasks: %d/%d done", completed, len(tasks)))
+					if t.handler != nil {
+						t.handler.OnCloudProgress(completed, len(tasks))
+					}
 				}
 			}
 		case "HITL_RESPONSE":
@@ -343,13 +351,6 @@ func (t *CloudDelegateTool) accumulateUsage(data string, usage *agent.TurnUsage)
 	usage.LLMCalls++
 	if meta.Metadata.ModelUsed != "" {
 		usage.Model = meta.Metadata.ModelUsed
-	}
-}
-
-// streamStatus sends a status line to the handler if available.
-func (t *CloudDelegateTool) streamStatus(line string) {
-	if t.handler != nil && line != "" {
-		t.handler.OnStreamDelta(line + "\n")
 	}
 }
 
