@@ -262,7 +262,9 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 
 		// --- Swarm-specific events ---
 		case "LEAD_DECISION":
-			// Internal — drop
+			if msg := event.Message; msg != "" && len(msg) <= 150 && t.handler != nil {
+				t.handler.OnCloudAgent("", "thinking", msg)
+			}
 		case "TASKLIST_UPDATED":
 			if payload := event.Payload; payload != nil {
 				if tasks, ok := payload["tasks"].([]interface{}); ok && len(tasks) > 0 {
@@ -280,7 +282,9 @@ func (t *CloudDelegateTool) Run(ctx context.Context, argsJSON string) (agent.Too
 				}
 			}
 		case "HITL_RESPONSE":
-			// Internal — drop
+			if event.Message != "" && t.handler != nil {
+				t.handler.OnCloudAgent("", "thinking", "Lead responding to your input")
+			}
 
 		case "WORKFLOW_COMPLETED":
 			if finalResult == "" {
