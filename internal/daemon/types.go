@@ -16,6 +16,7 @@ const (
 	MsgTypeReply      = "reply"
 	MsgTypeProgress   = "progress"
 	MsgTypeDisconnect = "disconnect"
+	MsgTypeEvent      = "event"
 )
 
 // Approval protocol (bidirectional relay via Cloud)
@@ -100,6 +101,15 @@ type ReplyPayload struct {
 	ThreadID string `json:"thread_id"`
 	Text     string `json:"text"`
 	Format   string `json:"format,omitempty"`
+}
+
+// DaemonEventPayload carries a single agent loop event to Cloud.
+type DaemonEventPayload struct {
+	EventType string                 `json:"event_type"`
+	Message   string                 `json:"message"`
+	Data      map[string]interface{} `json:"data,omitempty"`
+	Seq       int64                  `json:"seq"`
+	Timestamp string                 `json:"ts"`
 }
 
 // ClaimAckPayload is sent to confirm or deny a claim.
