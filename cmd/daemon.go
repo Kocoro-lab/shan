@@ -193,6 +193,8 @@ var daemonStartCmd = &cobra.Command{
 				autoApprove: autoApprove,
 				shannonDir:  shanDir,
 				deps:        deps,
+				wsClient:    wsClient,
+				messageID:   msg.MessageID,
 			}
 
 			result, err := daemon.RunAgent(msgCtx, deps, req, handler)
@@ -489,6 +491,8 @@ type daemonEventHandler struct {
 	shannonDir  string
 	deps        *daemon.ServerDeps
 	sessionID   string // set by RunAgent after session resolution (EventBus spans sessions)
+	wsClient    *daemon.Client // for event forwarding to Cloud
+	messageID   string         // scoped to current message
 }
 
 func (h *daemonEventHandler) SetSessionID(id string) { h.sessionID = id }
@@ -498,6 +502,11 @@ func (h *daemonEventHandler) OnToolCall(name string, args string) {
 		payload, _ := json.Marshal(map[string]interface{}{"tool": name, "status": "running", "session_id": h.sessionID})
 		h.deps.EventBus.Emit(daemon.Event{Type: daemon.EventToolStatus, Payload: payload})
 	}
+	if h.wsClient != nil && h.messageID != "" {
+		if err := h.wsClient.SendEvent(h.messageID, "TOOL_INVOKED", name, map[string]interface{}{"tool": name}); err != nil {
+			log.Printf("daemon: event forward failed: %v", err)
+		}
+	}
 }
 func (h *daemonEventHandler) OnToolResult(name string, args string, result agent.ToolResult, elapsed time.Duration) {
 	log.Printf("daemon: tool %s completed (%.1fs)", name, elapsed.Seconds())
@@ -505,9 +514,26 @@ func (h *daemonEventHandler) OnToolResult(name string, args string, result agent
 		payload, _ := json.Marshal(map[string]interface{}{"tool": name, "status": "completed", "elapsed": elapsed.Seconds(), "session_id": h.sessionID})
 		h.deps.EventBus.Emit(daemon.Event{Type: daemon.EventToolStatus, Payload: payload})
 	}
+	if h.wsClient != nil && h.messageID != "" {
+		if err := h.wsClient.SendEvent(h.messageID, "TOOL_COMPLETED", name, map[string]interface{}{"tool": name, "elapsed": elapsed.Seconds()}); err != nil {
+			log.Printf("daemon: event forward failed: %v", err)
+		}
+	}
 }
-func (h *daemonEventHandler) OnText(text string)            {}
-func (h *daemonEventHandler) OnStreamDelta(delta string)    {}
+func (h *daemonEventHandler) OnText(text string) {
+	if h.wsClient != nil && h.messageID != "" {
+		if err := h.wsClient.SendEvent(h.messageID, "LLM_OUTPUT", text, nil); err != nil {
+			log.Printf("daemon: event forward failed: %v", err)
+		}
+	}
+}
+func (h *daemonEventHandler) OnStreamDelta(delta string) {
+	if h.wsClient != nil && h.messageID != "" {
+		if err := h.wsClient.SendEvent(h.messageID, "LLM_PARTIAL", delta, nil); err != nil {
+			log.Printf("daemon: event forward failed: %v", err)
+		}
+	}
+}
 func (h *daemonEventHandler) OnUsage(usage agent.TurnUsage) {}
 func (h *daemonEventHandler) OnCloudAgent(agentID, status, message string) {
 	if h.deps.EventBus != nil {
