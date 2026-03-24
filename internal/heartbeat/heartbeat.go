@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -81,6 +82,7 @@ type agentHeartbeat struct {
 	activeHours     string
 	model           string
 	isolatedSession bool
+	goalDriven      bool
 	agentDir        string
 	mu              sync.Mutex // overlap prevention
 }
@@ -123,14 +125,19 @@ func New(agentsDir string, deps *daemon.ServerDeps) (*Manager, error) {
 			continue
 		}
 
-		entries = append(entries, &agentHeartbeat{
+		ah := &agentHeartbeat{
 			name:            name,
 			interval:        interval,
 			activeHours:     hb.ActiveHours,
 			model:           hb.Model,
 			isolatedSession: hb.IsIsolatedSession(),
+			goalDriven:      true,
 			agentDir:        filepath.Join(agentsDir, name),
-		})
+		}
+		if ah.goalDriven {
+			ah.isolatedSession = false
+		}
+		entries = append(entries, ah)
 	}
 
 	return &Manager{
@@ -178,7 +185,6 @@ func (m *Manager) runTicker(ctx context.Context, ah *agentHeartbeat) {
 
 // tick executes a single heartbeat check for an agent.
 func (m *Manager) tick(ctx context.Context, ah *agentHeartbeat) {
-	// Non-blocking overlap check.
 	if !ah.mu.TryLock() {
 		log.Printf("heartbeat: skip %q (previous tick still running)", ah.name)
 		return
@@ -192,49 +198,112 @@ func (m *Manager) tick(ctx context.Context, ah *agentHeartbeat) {
 
 	checklistPath := filepath.Join(ah.agentDir, "HEARTBEAT.md")
 	checklist, err := ReadChecklist(checklistPath)
-	if err != nil {
-		log.Printf("heartbeat: skip %q: read checklist: %v", ah.name, err)
-		return
-	}
-	if checklist == "" {
-		log.Printf("heartbeat: skip %q (no checklist)", ah.name)
+	if err != nil || checklist == "" {
+		log.Printf("heartbeat: skip %q (no goals/checklist)", ah.name)
 		return
 	}
 
+	start := time.Now()
+
+	if ah.goalDriven {
+		m.tickGoalDriven(ctx, ah, checklist, start)
+	} else {
+		m.tickChecklist(ctx, ah, checklist, start)
+	}
+}
+
+// tickGoalDriven runs a goal-driven heartbeat with session context.
+func (m *Manager) tickGoalDriven(ctx context.Context, ah *agentHeartbeat, goals string, start time.Time) {
+	routeKey := "agent:" + ah.name
+	sessionsDir := filepath.Join(ah.agentDir, "sessions")
+
+	sessionID, history, err := m.deps.SessionCache.ResolveLatestSession(routeKey, sessionsDir)
+	if err != nil {
+		log.Printf("heartbeat: %q skipped_no_session: %v", ah.name, err)
+		return
+	}
+
+	prompt := FormatGoalPrompt(goals)
+	collector := &TranscriptCollector{}
+
+	req := daemon.RunAgentRequest{
+		Agent:          ah.name,
+		Source:         "heartbeat",
+		Text:           prompt,
+		Ephemeral:      true,
+		BypassRouting:  true,
+		ModelOverride:  ah.model,
+		SessionHistory: history,
+	}
+
+	result, err := daemon.RunAgent(ctx, m.deps, req, collector)
+	elapsed := time.Since(start).Milliseconds()
+
+	if err != nil {
+		log.Printf("heartbeat: %q error (session=%s, duration=%dms): %v", ah.name, sessionID, elapsed, err)
+		m.emitAlert(ah.name, fmt.Sprintf("Heartbeat error: %v", err), "")
+		return
+	}
+
+	if IsHeartbeatOKFromMessages(collector.Messages) {
+		log.Printf("heartbeat: %q ok (session=%s, duration=%dms)", ah.name, sessionID, elapsed)
+		return
+	}
+
+	appendErr := m.deps.SessionCache.AppendToSession(routeKey, sessionsDir, sessionID, collector.Messages)
+	if appendErr != nil {
+		if errors.Is(appendErr, daemon.ErrSessionChanged) {
+			log.Printf("heartbeat: %q session_changed (session=%s, duration=%dms)", ah.name, sessionID, elapsed)
+			m.emitAlert(ah.name, "Heartbeat completed but session changed — turn dropped", "")
+		} else {
+			log.Printf("heartbeat: %q append error (session=%s, duration=%dms): %v", ah.name, sessionID, elapsed, appendErr)
+		}
+		return
+	}
+
+	log.Printf("heartbeat: %q action (session=%s, duration=%dms): %s", ah.name, sessionID, elapsed, result.Reply)
+	m.emitAlert(ah.name, result.Reply, sessionID)
+}
+
+// tickChecklist runs a legacy checklist-based heartbeat.
+func (m *Manager) tickChecklist(ctx context.Context, ah *agentHeartbeat, checklist string, start time.Time) {
 	prompt := FormatPrompt(checklist)
 	req := daemon.RunAgentRequest{
 		Agent:         ah.name,
 		Source:        "heartbeat",
 		Text:          prompt,
-		NewSession:    ah.isolatedSession, // Ephemeral=true below means no disk write regardless;
-		Ephemeral:     true,               // isolated heartbeats intentionally run without history.
+		NewSession:    ah.isolatedSession,
+		Ephemeral:     true,
 		ModelOverride: ah.model,
 	}
-
-	handler := &TranscriptCollector{}
-	result, err := daemon.RunAgent(ctx, m.deps, req, handler)
+	collector := &TranscriptCollector{}
+	result, err := daemon.RunAgent(ctx, m.deps, req, collector)
 	if err != nil {
 		log.Printf("heartbeat: agent %q error: %v", ah.name, err)
 		return
 	}
-
 	if IsHeartbeatOK(result.Reply) {
 		log.Printf("heartbeat: agent %q OK", ah.name)
 		return
 	}
-
 	log.Printf("heartbeat: agent %q alert: %s", ah.name, result.Reply)
-	if m.deps.EventBus != nil {
-		payload, _ := json.Marshal(map[string]string{
-			"agent":      ah.name,
-			"text":       result.Reply,
-			"session_id": result.SessionID,
-		})
-		m.deps.EventBus.Emit(daemon.Event{
-			Type:    daemon.EventHeartbeatAlert,
-			Payload: payload,
-		})
+	m.emitAlert(ah.name, result.Reply, result.SessionID)
+}
+
+// emitAlert sends a heartbeat alert event via the event bus.
+func (m *Manager) emitAlert(agent, text, sessionID string) {
+	if m.deps.EventBus == nil {
+		return
 	}
+	payload, _ := json.Marshal(map[string]string{
+		"agent":      agent,
+		"text":       text,
+		"session_id": sessionID,
+	})
+	m.deps.EventBus.Emit(daemon.Event{
+		Type:    daemon.EventHeartbeatAlert,
+		Payload: payload,
+	})
 }
 
 // Close cancels all tickers and waits for goroutines to finish.
