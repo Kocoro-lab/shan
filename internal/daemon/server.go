@@ -22,6 +22,7 @@ import (
 	"github.com/Kocoro-lab/ShanClaw/internal/agent"
 	"github.com/Kocoro-lab/ShanClaw/internal/agents"
 	"github.com/Kocoro-lab/ShanClaw/internal/config"
+	"github.com/Kocoro-lab/ShanClaw/internal/mcp"
 	"github.com/Kocoro-lab/ShanClaw/internal/permissions"
 	"github.com/Kocoro-lab/ShanClaw/internal/schedule"
 	"github.com/Kocoro-lab/ShanClaw/internal/session"
@@ -1882,10 +1883,23 @@ func (s *Server) handleConfigStatus(w http.ResponseWriter, r *http.Request) {
 	resp := make(map[string]interface{})
 
 	if cfg != nil && len(cfg.MCPServers) > 0 {
+		// Build set of live-connected server names from MCPManager.
+		s.deps.mu.RLock()
+		mgr := s.deps.MCPManager
+		s.deps.mu.RUnlock()
+		connected := make(map[string]bool)
+		if mgr != nil {
+			for _, name := range mgr.ConnectedServers() {
+				connected[name] = true
+			}
+		}
+
 		mcpStatus := make(map[string]string, len(cfg.MCPServers))
 		for name, srv := range cfg.MCPServers {
 			if srv.Disabled {
 				mcpStatus[name] = "disabled"
+			} else if connected[name] {
+				mcpStatus[name] = "connected"
 			} else {
 				mcpStatus[name] = "enabled"
 			}
@@ -1936,8 +1950,9 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	var regErr error
 	if mcpChanged {
 		var newReg *agent.ToolRegistry
+		var newMCPMgr *mcp.ClientManager
 		var newCleanup func()
-		newReg, _, newCleanup, regErr = tools.RegisterAll(s.deps.GW, newCfg)
+		newReg, _, newMCPMgr, newCleanup, regErr = tools.RegisterAll(s.deps.GW, newCfg)
 		if regErr != nil {
 			log.Printf("daemon: reload warning: %v", regErr)
 		}
@@ -1947,6 +1962,7 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 		oldCleanup := s.deps.Cleanup
 		s.deps.Config = newCfg
 		s.deps.Registry = newReg
+		s.deps.MCPManager = newMCPMgr
 		s.deps.Cleanup = newCleanup
 		s.deps.mu.Unlock()
 
@@ -1972,10 +1988,23 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 
 	// MCP server status for UI indicators
 	if len(newCfg.MCPServers) > 0 {
+		// Build set of live-connected server names from MCPManager.
+		s.deps.mu.RLock()
+		mgr := s.deps.MCPManager
+		s.deps.mu.RUnlock()
+		connected := make(map[string]bool)
+		if mgr != nil {
+			for _, name := range mgr.ConnectedServers() {
+				connected[name] = true
+			}
+		}
+
 		mcpStatus := make(map[string]string, len(newCfg.MCPServers))
 		for name, srv := range newCfg.MCPServers {
 			if srv.Disabled {
 				mcpStatus[name] = "disabled"
+			} else if connected[name] {
+				mcpStatus[name] = "connected"
 			} else {
 				mcpStatus[name] = "enabled"
 			}

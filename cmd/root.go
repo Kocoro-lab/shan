@@ -127,7 +127,7 @@ func runOneShot(cfg *config.Config, query string, agentOverride *agents.Agent) e
 	}
 
 	gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
-	reg, skillsPtr, cleanup, serverErr := tools.RegisterAll(gw, cfg, agentOverride)
+	reg, skillsPtr, _, cleanup, serverErr := tools.RegisterAll(gw, cfg, agentOverride)
 	defer cleanup()
 	if serverErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", serverErr)

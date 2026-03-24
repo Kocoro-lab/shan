@@ -68,7 +68,7 @@ var daemonStartCmd = &cobra.Command{
 		defer pidFile.Close()
 
 		gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
-		reg, skillsPtr, cleanup, serverErr := tools.RegisterAll(gw, cfg)
+		reg, skillsPtr, mcpMgr, cleanup, serverErr := tools.RegisterAll(gw, cfg)
 		if serverErr != nil {
 			log.Printf("Warning: %v", serverErr)
 		}
@@ -107,6 +107,7 @@ var daemonStartCmd = &cobra.Command{
 			Config:          cfg,
 			GW:              gw,
 			Registry:        reg,
+			MCPManager:      mcpMgr,
 			Cleanup:         cleanup,
 			ShannonDir:      shanDir,
 			AgentsDir:       agentsDir,

@@ -421,7 +421,7 @@ func (m *Model) loadServerTools() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		reg, cleanup, err := tools.CompleteRegistration(ctx, m.gateway, m.cfg, m.toolRegistry, m.agentOverride)
+		reg, _, cleanup, err := tools.CompleteRegistration(ctx, m.gateway, m.cfg, m.toolRegistry, m.agentOverride)
 
 		// Cloud delegation tool
 		var cloudAgentName, cloudAgentPrompt string

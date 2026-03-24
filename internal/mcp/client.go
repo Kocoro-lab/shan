@@ -97,6 +97,17 @@ func (m *ClientManager) ConnectAll(ctx context.Context, servers map[string]MCPSe
 	return allTools, nil
 }
 
+// ConnectedServers returns the names of all servers that have an active client connection.
+func (m *ClientManager) ConnectedServers() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	names := make([]string, 0, len(m.clients))
+	for name := range m.clients {
+		names = append(names, name)
+	}
+	return names
+}
+
 func (m *ClientManager) connect(ctx context.Context, name string, cfg MCPServerConfig) ([]RemoteTool, error) {
 	var c mcpclient.MCPClient
 	var err error

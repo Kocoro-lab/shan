@@ -21,6 +21,7 @@ import (
 	"github.com/Kocoro-lab/ShanClaw/internal/client"
 	"github.com/Kocoro-lab/ShanClaw/internal/config"
 	"github.com/Kocoro-lab/ShanClaw/internal/hooks"
+	"github.com/Kocoro-lab/ShanClaw/internal/mcp"
 	"github.com/Kocoro-lab/ShanClaw/internal/schedule"
 	"github.com/Kocoro-lab/ShanClaw/internal/session"
 	"github.com/Kocoro-lab/ShanClaw/internal/skills"
@@ -138,7 +139,8 @@ type ServerDeps struct {
 	Config          *config.Config
 	GW              *client.GatewayClient
 	Registry        *agent.ToolRegistry
-	Cleanup         func() // closes MCP connections; swapped on reload
+	MCPManager      *mcp.ClientManager // live MCP connections; swapped on reload
+	Cleanup         func()             // closes MCP connections; swapped on reload
 	ShannonDir      string
 	AgentsDir       string
 	Auditor         *audit.AuditLogger

@@ -162,7 +162,7 @@ func ApplyToolFilter(reg *agent.ToolRegistry, agentDef ...*agents.Agent) *agent.
 // local-only registry, then applies per-agent tool filtering. The filter runs
 // AFTER all tool sources are registered so it applies to MCP and gateway tools too.
 // The returned cleanup function closes MCP connections.
-func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *config.Config, baseReg *agent.ToolRegistry, agentDef ...*agents.Agent) (*agent.ToolRegistry, func(), error) {
+func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *config.Config, baseReg *agent.ToolRegistry, agentDef ...*agents.Agent) (*agent.ToolRegistry, *mcp.ClientManager, func(), error) {
 	reg := baseReg.Clone()
 
 	mcpServers := resolveMCPServers(cfg, agentDef...)
@@ -210,14 +210,14 @@ func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *co
 		}
 	}
 
-	return reg, cleanup, err
+	return reg, mcpMgr, cleanup, err
 }
 
 // RegisterAll registers local tools, connects MCP servers, and then fetches
 // server-side tools from the gateway. Local tools take priority, then MCP, then gateway.
 // If agentDef is non-nil, tool filtering and MCP scoping are applied per-agent.
 // The returned cleanup function must be called on shutdown.
-func RegisterAll(gw *client.GatewayClient, cfg *config.Config, agentDef ...*agents.Agent) (*agent.ToolRegistry, *[]*skills.Skill, func(), error) {
+func RegisterAll(gw *client.GatewayClient, cfg *config.Config, agentDef ...*agents.Agent) (*agent.ToolRegistry, *[]*skills.Skill, *mcp.ClientManager, func(), error) {
 	// Kill any orphaned chromedp Chrome processes from previous daemon runs
 	CleanupOrphanedChromedp()
 
@@ -226,14 +226,14 @@ func RegisterAll(gw *client.GatewayClient, cfg *config.Config, agentDef ...*agen
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	reg, remoteCleanup, err := CompleteRegistration(ctx, gw, cfg, reg, agentDef...)
+	reg, mcpMgr, remoteCleanup, err := CompleteRegistration(ctx, gw, cfg, reg, agentDef...)
 
 	cleanup := func() {
 		baseCleanup()
 		remoteCleanup()
 	}
 
-	return reg, skillsPtr, cleanup, err
+	return reg, skillsPtr, mcpMgr, cleanup, err
 }
 
 // resolveMCPServers determines which MCP servers to connect based on agent config.
