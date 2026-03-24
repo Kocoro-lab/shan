@@ -15,10 +15,10 @@ import (
 )
 
 var ErrSessionChanged = errors.New("session changed since pre-check")
+var ErrRouteActive = errors.New("route has an active run")
 
 type routeEntry struct {
 	mu            sync.Mutex
-	appendMu      sync.Mutex // serializes non-destructive appends
 	cancel        context.CancelFunc
 	cancelPending bool       // set under sc.mu when CancelRoute fires before cancel is assigned
 	done          chan struct{}
@@ -400,9 +400,23 @@ func (sc *SessionCache) CloseAll() {
 	sc.managers = make(map[string]*session.Manager)
 }
 
-// ResolveLatestSession returns the latest session ID and messages for a route
-// without acquiring the run lock. Returns error if route or session doesn't exist.
+// ResolveLatestSession returns the latest session ID and messages for a route.
+// Uses TryLock on entry.mu — returns ErrRouteActive if a run is in progress
+// to avoid reading session state while it's being mutated.
 func (sc *SessionCache) ResolveLatestSession(routeKey string, sessionsDir string) (string, []client.Message, error) {
+	if sessionsDir != "" {
+		resolved, err := filepath.EvalSymlinks(filepath.Dir(sessionsDir))
+		if err == nil {
+			sessionsDir = filepath.Join(resolved, filepath.Base(sessionsDir))
+		}
+		root, _ := filepath.EvalSymlinks(sc.shannonDir)
+		if root == "" {
+			root = filepath.Clean(sc.shannonDir)
+		}
+		if !strings.HasPrefix(filepath.Clean(sessionsDir), root+string(filepath.Separator)) {
+			return "", nil, fmt.Errorf("sessions dir %q is outside shannon root %q", sessionsDir, root)
+		}
+	}
 	sc.mu.Lock()
 	entry, ok := sc.routes[routeKey]
 	if !ok {
@@ -417,8 +431,10 @@ func (sc *SessionCache) ResolveLatestSession(routeKey string, sessionsDir string
 		return "", nil, fmt.Errorf("no route entry for %q", routeKey)
 	}
 
-	entry.appendMu.Lock()
-	defer entry.appendMu.Unlock()
+	if !entry.mu.TryLock() {
+		return "", nil, ErrRouteActive
+	}
+	defer entry.mu.Unlock()
 
 	sess, err := entry.manager.ResumeLatest()
 	if err != nil || sess == nil {
@@ -430,7 +446,8 @@ func (sc *SessionCache) ResolveLatestSession(routeKey string, sessionsDir string
 }
 
 // AppendToSession appends messages to the latest session for a route without
-// canceling any in-flight run. Strictly non-creating.
+// canceling any in-flight run. Returns ErrRouteActive if a run is in progress
+// (entry.mu held) to avoid concurrent session mutation.
 func (sc *SessionCache) AppendToSession(routeKey string, sessionsDir string, expectedSessionID string, messages []client.Message) error {
 	sc.mu.Lock()
 	entry, ok := sc.routes[routeKey]
@@ -439,8 +456,11 @@ func (sc *SessionCache) AppendToSession(routeKey string, sessionsDir string, exp
 		return fmt.Errorf("no route entry for %q", routeKey)
 	}
 
-	entry.appendMu.Lock()
-	defer entry.appendMu.Unlock()
+	// Ensure no concurrent routed run is mutating the session.
+	if !entry.mu.TryLock() {
+		return ErrRouteActive
+	}
+	defer entry.mu.Unlock()
 
 	sess, err := entry.manager.ResumeLatest()
 	if err != nil || sess == nil {

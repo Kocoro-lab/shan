@@ -1887,7 +1887,7 @@ func (s *Server) handleConfigStatus(w http.ResponseWriter, r *http.Request) {
 			if srv.Disabled {
 				mcpStatus[name] = "disabled"
 			} else {
-				mcpStatus[name] = "connected"
+				mcpStatus[name] = "enabled"
 			}
 		}
 		resp["mcp_servers"] = mcpStatus
@@ -1977,7 +1977,7 @@ func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 			if srv.Disabled {
 				mcpStatus[name] = "disabled"
 			} else {
-				mcpStatus[name] = "connected"
+				mcpStatus[name] = "enabled"
 			}
 		}
 		// Mark failed servers from registration error
