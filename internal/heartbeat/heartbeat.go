@@ -250,9 +250,9 @@ func (m *Manager) tickGoalDriven(ctx context.Context, ah *agentHeartbeat, goals 
 		return
 	}
 
-	// Prepend the heartbeat prompt as a user message so the full turn is persisted
-	turn := append([]client.Message{{Role: "user", Content: client.NewTextContent(prompt)}}, collector.Messages...)
-	appendErr := m.deps.SessionCache.AppendToSession(routeKey, sessionsDir, sessionID, turn)
+	// Only persist the agent's response (not the heartbeat system prompt).
+	// The prompt is an internal mechanism — users should only see the agent's proactive message.
+	appendErr := m.deps.SessionCache.AppendToSession(routeKey, sessionsDir, sessionID, collector.Messages)
 	if appendErr != nil {
 		if errors.Is(appendErr, daemon.ErrSessionChanged) {
 			log.Printf("heartbeat: %q session_changed (session=%s, duration=%dms)", ah.name, sessionID, elapsed)
