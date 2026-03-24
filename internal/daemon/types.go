@@ -17,6 +17,7 @@ const (
 	MsgTypeProgress   = "progress"
 	MsgTypeDisconnect = "disconnect"
 	MsgTypeEvent      = "event"
+	MsgTypeProactive  = "proactive"
 )
 
 // Approval protocol (bidirectional relay via Cloud)
@@ -101,6 +102,15 @@ type ReplyPayload struct {
 	ThreadID string `json:"thread_id"`
 	Text     string `json:"text"`
 	Format   string `json:"format,omitempty"`
+}
+
+// ProactivePayload is sent by the daemon to push an unsolicited message
+// to all channels mapped to the named agent.
+type ProactivePayload struct {
+	AgentName string `json:"agent_name"`
+	Text      string `json:"text"`
+	Format    string `json:"format,omitempty"` // "text" (default) or "markdown"
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // DaemonEventPayload carries a single agent loop event to Cloud.

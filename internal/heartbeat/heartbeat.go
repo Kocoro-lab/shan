@@ -270,6 +270,13 @@ func (m *Manager) tickGoalDriven(ctx context.Context, ah *agentHeartbeat, goals 
 
 	log.Printf("heartbeat: %q action (session=%s, duration=%dms): %s", ah.name, sessionID, elapsed, result.Reply)
 	m.emitAlert(ah.name, result.Reply, sessionID)
+
+	// Deliver to Slack/Lark/etc. via Shannon Cloud
+	if m.deps.WSClient != nil {
+		if err := m.deps.WSClient.SendProactive(ah.name, result.Reply, sessionID); err != nil {
+			log.Printf("heartbeat: %q proactive send failed: %v", ah.name, err)
+		}
+	}
 }
 
 // tickChecklist runs a legacy checklist-based heartbeat.

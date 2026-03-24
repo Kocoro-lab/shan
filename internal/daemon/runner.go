@@ -146,6 +146,7 @@ type ServerDeps struct {
 	SessionCache    *SessionCache
 	EventBus        *EventBus
 	ScheduleManager *schedule.Manager
+	WSClient        *Client // WebSocket client for proactive messages
 }
 
 // Snapshot returns current Config and Registry under read lock.

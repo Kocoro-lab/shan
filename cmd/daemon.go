@@ -217,6 +217,7 @@ var daemonStartCmd = &cobra.Command{
 		localServer.SetApprovalResolvedNotifier(wsClient.SendApprovalResolved)
 		wsClient.SetEventBus(localServer.EventBus())
 		deps.EventBus = localServer.EventBus()
+		deps.WSClient = wsClient
 
 		// Start file watcher and heartbeat manager.
 		var triggerMu sync.Mutex

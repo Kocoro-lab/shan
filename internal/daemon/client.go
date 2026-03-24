@@ -148,6 +148,27 @@ func (c *Client) SendReply(messageID string, payload ReplyPayload) error {
 	return c.sendEnvelope(DaemonMessage{Type: MsgTypeReply, MessageID: messageID, Payload: payloadBytes})
 }
 
+// SendProactive sends an unsolicited message to all channels mapped to the agent.
+// This is fire-and-forget — no claim/ack cycle.
+func (c *Client) SendProactive(agentName, text, sessionID string) error {
+	if agentName == "" || text == "" {
+		return nil
+	}
+	payload, err := json.Marshal(ProactivePayload{
+		AgentName: agentName,
+		Text:      text,
+		Format:    FormatText,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal proactive payload: %w", err)
+	}
+	return c.sendEnvelope(DaemonMessage{
+		Type:    MsgTypeProactive,
+		Payload: payload,
+	})
+}
+
 func (c *Client) sendDisconnect() error {
 	return c.sendEnvelope(DaemonMessage{Type: MsgTypeDisconnect})
 }
