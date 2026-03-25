@@ -49,3 +49,27 @@ func TestHealthState_String(t *testing.T) {
 		t.Errorf("expected 'disconnected', got %q", StateDisconnected.String())
 	}
 }
+
+func TestSupervisor_RegisterProbe(t *testing.T) {
+	mgr := NewClientManager()
+	sup := NewSupervisor(mgr)
+	sup.RegisterCapabilityProbe("playwright", &PlaywrightProbe{})
+}
+
+func TestSupervisor_HealthStates_Empty(t *testing.T) {
+	mgr := NewClientManager()
+	sup := NewSupervisor(mgr)
+	states := sup.HealthStates()
+	if len(states) != 0 {
+		t.Errorf("expected empty states, got %d", len(states))
+	}
+}
+
+func TestSupervisor_ProbeNow_BeforeStart(t *testing.T) {
+	mgr := NewClientManager()
+	sup := NewSupervisor(mgr)
+	health := sup.ProbeNow("nonexistent")
+	if health.State != StateDisconnected {
+		t.Errorf("expected disconnected for unknown server, got %v", health.State)
+	}
+}

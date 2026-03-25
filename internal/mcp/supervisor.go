@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -89,4 +90,125 @@ func (b *backoffState) recordSuccess() {
 
 func (b *backoffState) isDormant() bool {
 	return b.interval >= b.dormant
+}
+
+// Supervisor monitors MCP server health via periodic transport and capability probes.
+type Supervisor struct {
+	mu                 sync.Mutex
+	mgr                *ClientManager
+	servers            map[string]*serverEntry
+	probes             map[string]CapabilityProbe
+	onChange           func(serverName string, oldState, newState HealthState)
+	cancel             context.CancelFunc
+	started            bool
+	transportInterval  time.Duration
+	capabilityInterval time.Duration
+	wg                 sync.WaitGroup
+}
+
+type serverEntry struct {
+	config            MCPServerConfig
+	health            ServerHealth
+	transportBackoff  *backoffState
+	capabilityBackoff *backoffState
+	probeNowCh        chan struct{}       // signal channel (buffered size 1)
+	waitersMu         sync.Mutex         // protects waiters slice
+	waiters           []chan ServerHealth // pending ProbeNow callers
+}
+
+// NewSupervisor creates a Supervisor that monitors MCP servers via the given ClientManager.
+func NewSupervisor(mgr *ClientManager) *Supervisor {
+	return &Supervisor{
+		mgr:                mgr,
+		servers:            make(map[string]*serverEntry),
+		probes:             make(map[string]CapabilityProbe),
+		transportInterval:  30 * time.Second,
+		capabilityInterval: 60 * time.Second,
+	}
+}
+
+// RegisterCapabilityProbe associates a capability probe with a server name.
+func (s *Supervisor) RegisterCapabilityProbe(serverName string, probe CapabilityProbe) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.probes[serverName] = probe
+}
+
+// SetOnChange registers a callback invoked on health state transitions.
+func (s *Supervisor) SetOnChange(fn func(serverName string, oldState, newState HealthState)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onChange = fn
+}
+
+// HealthStates returns a snapshot of all monitored servers' health.
+func (s *Supervisor) HealthStates() map[string]ServerHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[string]ServerHealth, len(s.servers))
+	for name, entry := range s.servers {
+		result[name] = entry.health
+	}
+	return result
+}
+
+// HealthFor returns the health of a single server, or StateDisconnected if unknown.
+func (s *Supervisor) HealthFor(serverName string) ServerHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry, ok := s.servers[serverName]; ok {
+		return entry.health
+	}
+	return ServerHealth{State: StateDisconnected}
+}
+
+// ProbeNow requests an immediate probe for a server. Before Start(), returns current health.
+// Uses waiter list for coalescing: all concurrent callers get the same result.
+func (s *Supervisor) ProbeNow(serverName string) ServerHealth {
+	s.mu.Lock()
+	if !s.started {
+		if entry, ok := s.servers[serverName]; ok {
+			h := entry.health
+			s.mu.Unlock()
+			return h
+		}
+		s.mu.Unlock()
+		return ServerHealth{State: StateDisconnected}
+	}
+	entry, ok := s.servers[serverName]
+	if !ok {
+		s.mu.Unlock()
+		return ServerHealth{State: StateDisconnected}
+	}
+
+	health := entry.health
+	inBackoff := entry.transportBackoff.interval > 0 || entry.capabilityBackoff.interval > 0
+	stale := time.Since(health.LastTransportOK) > 60*time.Second
+	s.mu.Unlock()
+
+	if health.State == StateHealthy && !inBackoff && !stale {
+		return health
+	}
+
+	respCh := make(chan ServerHealth, 1)
+	entry.waitersMu.Lock()
+	entry.waiters = append(entry.waiters, respCh)
+	entry.waitersMu.Unlock()
+
+	select {
+	case entry.probeNowCh <- struct{}{}:
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	select {
+	case h := <-respCh:
+		return h
+	case <-ctx.Done():
+		s.mu.Lock()
+		h := entry.health
+		s.mu.Unlock()
+		return h
+	}
 }
