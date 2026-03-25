@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -347,10 +348,24 @@ func closePlaywrightExtensionTab(mcpMgr *mcp.ClientManager) {
 					} else {
 						log.Printf("Playwright: closed Bridge extension connect tab (index %d)", idxNum)
 					}
+					// Send Chrome to the background so the reconnect doesn't
+					// disrupt the user by popping a window to the foreground.
+					hideChrome()
 					return
 				}
 			}
 		}
+	}
+}
+
+// hideChrome sends Chrome to the background so it doesn't steal focus
+// after the Playwright Bridge extension reconnects.
+func hideChrome() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "osascript", "-e", `tell application "System Events" to set visible of process "Google Chrome" to false`)
+	if err := cmd.Run(); err != nil {
+		log.Printf("Playwright: failed to hide Chrome: %v", err)
 	}
 }
 
