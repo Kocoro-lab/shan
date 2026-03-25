@@ -199,8 +199,8 @@ func TestRebuildRegistryForHealth_PlaywrightHealthy(t *testing.T) {
 	baseline.Register(&ThinkTool{})
 	baseline.Register(&BrowserTool{})
 
-	healthStates := map[string]mcp.HealthState{
-		"playwright": mcp.StateHealthy,
+	healthStates := map[string]mcp.ServerHealth{
+		"playwright": {State: mcp.StateHealthy},
 	}
 
 	mgr := mcp.NewClientManager()
@@ -222,8 +222,8 @@ func TestRebuildRegistryForHealth_PlaywrightDisconnected(t *testing.T) {
 	baseline.Register(&ThinkTool{})
 	baseline.Register(&BrowserTool{})
 
-	healthStates := map[string]mcp.HealthState{
-		"playwright": mcp.StateDisconnected,
+	healthStates := map[string]mcp.ServerHealth{
+		"playwright": {State: mcp.StateDisconnected},
 	}
 
 	reg := RebuildRegistryForHealth(baseline, nil, nil, healthStates, nil)

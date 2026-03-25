@@ -539,7 +539,7 @@ func (s *Server) handleMessageSSE(w http.ResponseWriter, r *http.Request, req Ru
 	defer reqBroker.CancelAll()
 
 	// Resolve auto_approve: per-agent overrides global
-	cfg, _ := s.deps.Snapshot()
+	cfg, _, _ := s.deps.Snapshot()
 	autoApprove := cfg.Daemon.AutoApprove
 	if req.Agent != "" {
 		if a, err := agents.LoadAgent(s.deps.AgentsDir, req.Agent); err == nil && a.Config != nil && a.Config.AutoApprove != nil {
@@ -1814,7 +1814,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cfg, _ := s.deps.Snapshot()
+	cfg, _, _ := s.deps.Snapshot()
 	effectiveJSON, _ := json.Marshal(cfg)
 	var effectiveMap map[string]interface{}
 	json.Unmarshal(effectiveJSON, &effectiveMap)
@@ -1879,7 +1879,7 @@ func (s *Server) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleConfigStatus returns current MCP server status without restarting processes.
 func (s *Server) handleConfigStatus(w http.ResponseWriter, r *http.Request) {
-	cfg, _ := s.deps.Snapshot()
+	cfg, _, _ := s.deps.Snapshot()
 	resp := make(map[string]interface{})
 
 	if cfg != nil && len(cfg.MCPServers) > 0 {
@@ -1934,7 +1934,7 @@ func mcpConfigChanged(oldCfg, newCfg *config.Config) bool {
 }
 
 func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
-	oldCfg, _ := s.deps.Snapshot()
+	oldCfg, _, _ := s.deps.Snapshot()
 
 	newCfg, err := config.Load()
 	if err != nil {

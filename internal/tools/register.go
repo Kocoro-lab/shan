@@ -393,15 +393,15 @@ func RebuildRegistryForHealth(
 	baseline *agent.ToolRegistry,
 	gatewayOverlay []agent.Tool,
 	postOverlays []agent.Tool,
-	healthStates map[string]mcp.HealthState,
+	healthStates map[string]mcp.ServerHealth,
 	mcpMgr *mcp.ClientManager,
 ) *agent.ToolRegistry {
 	reg := baseline.Clone()
 
 	playwrightHealthy := false
 	if mcpMgr != nil {
-		for serverName, state := range healthStates {
-			if state != mcp.StateHealthy {
+		for serverName, health := range healthStates {
+			if health.State != mcp.StateHealthy {
 				continue
 			}
 			tools := mcpMgr.CachedTools(serverName)

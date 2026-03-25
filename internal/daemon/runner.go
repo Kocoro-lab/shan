@@ -140,6 +140,7 @@ type ServerDeps struct {
 	GW              *client.GatewayClient
 	Registry        *agent.ToolRegistry
 	MCPManager      *mcp.ClientManager // live MCP connections; swapped on reload
+	Supervisor      *mcp.Supervisor    // MCP health supervisor; swapped on reload
 	Cleanup         func()             // closes MCP connections; swapped on reload
 	ShannonDir      string
 	AgentsDir       string
@@ -151,13 +152,13 @@ type ServerDeps struct {
 	WSClient        *Client // WebSocket client for proactive messages
 }
 
-// Snapshot returns current Config and Registry under read lock.
+// Snapshot returns current Config, Registry, and Supervisor under read lock.
 // Callers use the returned values without holding the lock.
-func (d *ServerDeps) Snapshot() (*config.Config, *agent.ToolRegistry) {
+func (d *ServerDeps) Snapshot() (*config.Config, *agent.ToolRegistry, *mcp.Supervisor) {
 	d.mu.RLock()
-	cfg, reg := d.Config, d.Registry
+	cfg, reg, sup := d.Config, d.Registry, d.Supervisor
 	d.mu.RUnlock()
-	return cfg, reg
+	return cfg, reg, sup
 }
 
 // ShutdownCleanup captures and calls the current Cleanup function under lock,
@@ -181,8 +182,17 @@ func (d *ServerDeps) WriteUnlock() { d.mu.Unlock() }
 // The caller provides an EventHandler to control streaming, approval, and
 // event reporting (WS uses daemonEventHandler, HTTP uses httpEventHandler).
 func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handler agent.EventHandler) (*RunAgentResult, error) {
-	cfg, baseReg := deps.Snapshot()
-	if cfg == nil || deps.GW == nil || baseReg == nil || deps.SessionCache == nil {
+	// Phase 1: read supervisor atomically, probe if needed
+	cfg, _, sup := deps.Snapshot()
+	if cfg == nil || deps.GW == nil || deps.SessionCache == nil {
+		return nil, fmt.Errorf("daemon not fully configured")
+	}
+	if sup != nil {
+		sup.ProbeNow("playwright")
+	}
+	// Phase 2: re-snapshot to get post-swap registry
+	cfg, baseReg, _ := deps.Snapshot()
+	if baseReg == nil {
 		return nil, fmt.Errorf("daemon not fully configured")
 	}
 	agentName := req.Agent
