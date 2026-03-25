@@ -213,6 +213,33 @@ func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *co
 	return reg, mcpMgr, cleanup, err
 }
 
+// RegisterAllWithBaseline is like RegisterAll but also returns the baseline (local-only)
+// registry separately, for use by the MCP health supervisor's registry rebuild.
+func RegisterAllWithBaseline(gw *client.GatewayClient, cfg *config.Config, agentDef ...*agents.Agent) (
+	baseline *agent.ToolRegistry,
+	reg *agent.ToolRegistry,
+	skillsPtr *[]*skills.Skill,
+	mcpMgr *mcp.ClientManager,
+	cleanup func(),
+	err error,
+) {
+	CleanupOrphanedChromedp()
+	localReg, sp, baseCleanup := RegisterLocalTools(cfg)
+	baseline = localReg
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	reg, mcpMgr, remoteCleanup, err := CompleteRegistration(ctx, gw, cfg, localReg, agentDef...)
+
+	cleanup = func() {
+		baseCleanup()
+		remoteCleanup()
+	}
+
+	return baseline, reg, sp, mcpMgr, cleanup, err
+}
+
 // RegisterAll registers local tools, connects MCP servers, and then fetches
 // server-side tools from the gateway. Local tools take priority, then MCP, then gateway.
 // If agentDef is non-nil, tool filtering and MCP scoping are applied per-agent.

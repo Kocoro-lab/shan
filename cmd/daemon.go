@@ -21,6 +21,7 @@ import (
 	"github.com/Kocoro-lab/ShanClaw/internal/config"
 	"github.com/Kocoro-lab/ShanClaw/internal/daemon"
 	"github.com/Kocoro-lab/ShanClaw/internal/heartbeat"
+	"github.com/Kocoro-lab/ShanClaw/internal/mcp"
 	"github.com/Kocoro-lab/ShanClaw/internal/hooks"
 	"github.com/Kocoro-lab/ShanClaw/internal/permissions"
 	"github.com/Kocoro-lab/ShanClaw/internal/schedule"
@@ -68,13 +69,16 @@ var daemonStartCmd = &cobra.Command{
 		defer pidFile.Close()
 
 		gw := client.NewGatewayClient(cfg.Endpoint, cfg.APIKey)
-		reg, skillsPtr, mcpMgr, cleanup, serverErr := tools.RegisterAll(gw, cfg)
+		baselineReg, reg, skillsPtr, mcpMgr, cleanup, serverErr := tools.RegisterAllWithBaseline(gw, cfg)
 		if serverErr != nil {
 			log.Printf("Warning: %v", serverErr)
 		}
 		_ = skillsPtr // skills are set per-request in RunAgent
 
 		tools.RegisterCloudDelegate(reg, gw, cfg, nil, "", "") // daemon: agent forwarding per-message not yet supported
+
+		gatewayOverlay := tools.ExtractGatewayTools(reg)
+		postOverlays := tools.ExtractPostOverlays(reg, baselineReg)
 
 		var auditor *audit.AuditLogger
 		if shanDir != "" {
@@ -116,7 +120,35 @@ var daemonStartCmd = &cobra.Command{
 			SessionCache:    sessionCache,
 			ScheduleManager: scheduleManager,
 		}
-		defer deps.ShutdownCleanup()
+		defer func() {
+			if deps.Supervisor != nil {
+				deps.Supervisor.Stop()
+			}
+			deps.ShutdownCleanup()
+		}()
+
+		supervisor := mcp.NewSupervisor(mcpMgr)
+		supervisor.RegisterCapabilityProbe("playwright", &mcp.PlaywrightProbe{})
+		supervisor.SetOnChange(func(server string, oldState, newState mcp.HealthState) {
+			_, _, depsSup := deps.Snapshot()
+			if depsSup != supervisor {
+				return
+			}
+			newReg := tools.RebuildRegistryForHealth(
+				baselineReg, gatewayOverlay, postOverlays,
+				supervisor.HealthStates(), mcpMgr,
+			)
+			deps.WriteLock()
+			deps.Registry = newReg
+			deps.WriteUnlock()
+			log.Printf("MCP registry rebuilt: %d tools", len(newReg.All()))
+		})
+
+		deps.WriteLock()
+		deps.Supervisor = supervisor
+		deps.WriteUnlock()
+
+		supervisor.Start(ctx)
 
 		if !cfg.Daemon.AutoApprove {
 			log.Println("daemon: interactive approval mode — tools requiring approval will be sent to the client for user confirmation. Set daemon.auto_approve: true in config to auto-approve all tools.")
