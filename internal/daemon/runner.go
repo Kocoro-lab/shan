@@ -105,15 +105,25 @@ func (req *RunAgentRequest) EnsureRouteKey() {
 	}
 }
 
-func routeTitle(source, channel string) string {
-	if source == "" || channel == "" {
+func routeTitle(source, channel, sender string) string {
+	if source == "" {
 		return ""
 	}
 	s := strings.ToLower(strings.TrimSpace(source))
 	if s == "" {
 		return ""
 	}
-	return strings.ToUpper(s[:1]) + s[1:] + " " + channel
+	label := strings.ToUpper(s[:1]) + s[1:]
+
+	// Use sender name when available (e.g. "Slack · Wayland")
+	if sender != "" {
+		return label + " · " + sender
+	}
+	// Fall back to channel if it differs from source (avoid "Slack slack")
+	if channel != "" && strings.ToLower(channel) != s {
+		return label + " · " + channel
+	}
+	return label
 }
 
 // RunAgentResult is the output from RunAgent.
@@ -363,7 +373,7 @@ func RunAgent(ctx context.Context, deps *ServerDeps, req RunAgentRequest, handle
 		// Only set source-derived title for non-named-agent routes.
 		// Named agents always get session.AgentTitle in the post-loop block.
 		if sess.Title == "New session" && req.RouteKey != "" && !strings.HasPrefix(req.RouteKey, "agent:") {
-			title := routeTitle(req.Source, req.Channel)
+			title := routeTitle(req.Source, req.Channel, req.Sender)
 			if title != "" {
 				sess.Title = title
 			}

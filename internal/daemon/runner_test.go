@@ -76,6 +76,30 @@ func TestComputeRouteKey_AgentWithoutBypass(t *testing.T) {
 	}
 }
 
+func TestRouteTitle(t *testing.T) {
+	tests := []struct {
+		source, channel, sender, want string
+	}{
+		{"slack", "slack", "Wayland", "Slack · Wayland"},
+		{"slack", "slack", "", "Slack"},
+		{"line", "line", "Tanaka", "Line · Tanaka"},
+		{"feishu", "feishu", "", "Feishu"},
+		{"slack", "#general", "", "Slack · #general"},
+		{"slack", "#general", "Alice", "Slack · Alice"},
+		{"webhook", "hook-1", "", "Webhook · hook-1"},
+		{"", "slack", "Wayland", ""},
+		{"slack", "", "Wayland", "Slack · Wayland"},
+		{"", "", "", ""},
+	}
+	for _, tt := range tests {
+		got := routeTitle(tt.source, tt.channel, tt.sender)
+		if got != tt.want {
+			t.Errorf("routeTitle(%q, %q, %q) = %q, want %q",
+				tt.source, tt.channel, tt.sender, got, tt.want)
+		}
+	}
+}
+
 func TestRunAgentRequestSource(t *testing.T) {
 	req := RunAgentRequest{
 		Text:   "hello",
