@@ -1086,10 +1086,8 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if skill.Description == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("skill %q requires a description", skill.Name))
-			return
-		}
+		// Description is optional for name-only skill attachment (toggle model).
+		// Skills with prompt content still work as before (agent-scoped overrides).
 	}
 
 	// --- Apply mutations (all inputs validated) ---
@@ -1131,14 +1129,21 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	for _, skill := range req.Skills {
-		if skill == nil {
-			writeError(w, http.StatusBadRequest, "skill entry cannot be null")
+	if req.Skills != nil {
+		// Replace semantics: clear existing agent skills, then write only what's in the payload.
+		agentSkillsDir := filepath.Join(s.deps.AgentsDir, name, "skills")
+		if err := os.RemoveAll(agentSkillsDir); err != nil && !os.IsNotExist(err) {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("clear agent skills: %v", err))
 			return
 		}
-		if err := agents.WriteAgentSkill(s.deps.AgentsDir, name, skill); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("write skill %s: %v", skill.Name, err))
-			return
+		for _, skill := range req.Skills {
+			if skill == nil {
+				continue
+			}
+			if err := agents.WriteAgentSkill(s.deps.AgentsDir, name, skill); err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("write skill %s: %v", skill.Name, err))
+				return
+			}
 		}
 	}
 	a, err := agents.LoadAgent(s.deps.AgentsDir, name)
