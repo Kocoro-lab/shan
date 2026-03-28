@@ -95,7 +95,9 @@ func LaunchCDPChrome(port int) error {
 	cmd := exec.Command("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		fmt.Sprintf("--user-data-dir=%s", cdpDataDir),
-		"--window-position=-10000,-10000",
+		"--no-startup-window",
+		"--no-first-run",
+		"--no-default-browser-check",
 	)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -181,6 +183,11 @@ tell application "System Events"
 end tell`, pid)
 		exec.Command("osascript", "-e", script).Run() //nolint:errcheck
 	}()
+}
+
+// CDPChromePID returns the PID of the CDP Chrome main process, or "" if not running.
+func CDPChromePID() string {
+	return cdpChromePID()
 }
 
 // cdpChromePID returns the PID of the CDP Chrome main process, or "" if not running.

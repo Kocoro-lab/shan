@@ -85,18 +85,19 @@ func (t *MCPTool) Run(ctx context.Context, argsJSON string) (agent.ToolResult, e
 		args = make(map[string]any)
 	}
 
-	// CDP mode: ensure Chrome is running and bring it to front.
-	// Only check CDP when playwright is not already connected — the HTTP check
-	// at /json/version can be slow while an active WebSocket session exists,
-	// causing false-negative timeouts on subsequent tool calls.
+	// CDP mode: ensure Chrome is running when playwright is not yet connected.
+	// Only check CDP when not connected — the HTTP check at /json/version can be
+	// slow while an active WebSocket session exists, causing false-negative timeouts.
+	// Bring Chrome to front only when we just launched it (on-demand connect),
+	// not on every subsequent tool call.
 	if t.serverName == "playwright" {
 		if cfg, ok := t.manager.ConfigFor(t.serverName); ok && mcp.IsPlaywrightCDPMode(cfg) {
 			if !t.manager.IsConnected(t.serverName) {
 				if err := mcp.EnsureChromeDebugPort(mcp.DefaultCDPPort); err != nil {
 					return agent.ToolResult{Content: fmt.Sprintf("Chrome CDP unavailable: %v", err), IsError: true}, nil
 				}
+				mcp.BringCDPChromeToFront()
 			}
-			mcp.BringCDPChromeToFront()
 		}
 	}
 

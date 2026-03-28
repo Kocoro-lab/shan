@@ -167,10 +167,9 @@ func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *co
 
 	mcpServers := resolveMCPServers(cfg, agentDef...)
 
-	// CDP mode: ensure Chrome has the debug port before connecting playwright,
-	// but only when keepAlive is true (eager mode). When keepAlive is false,
-	// playwright-mcp starts without Chrome for tool discovery, then disconnects.
-	// Chrome launches on-demand at first tool invocation.
+	// CDP mode: only launch Chrome at boot when keepAlive is true (eager mode).
+	// playwright-mcp can discover tools without Chrome running, so keepAlive=false
+	// skips Chrome entirely — it launches on-demand at first tool invocation.
 	if pwCfg, hasPW := mcpServers["playwright"]; hasPW && !pwCfg.Disabled && mcp.IsPlaywrightCDPMode(pwCfg) {
 		if pwCfg.KeepAlive {
 			if err := mcp.EnsureChromeDebugPort(mcp.DefaultCDPPort); err != nil {
@@ -355,14 +354,24 @@ func CleanupPlaywrightReconnect(ctx context.Context, mcpMgr *mcp.ClientManager) 
 	hideChrome()
 }
 
-// hideChrome sends Chrome to the background so it doesn't steal focus
-// after the Playwright Bridge extension reconnects.
+// hideChrome sends the CDP Chrome to the background so it doesn't steal focus.
+// Scoped to the daemon-owned instance by PID to avoid hiding the user's personal Chrome.
 func hideChrome() {
+	pid := mcp.CDPChromePID()
+	if pid == "" {
+		return
+	}
+	script := fmt.Sprintf(`tell application "System Events"
+	try
+		set p to first process whose unix id is %s
+		set visible of p to false
+	end try
+end tell`, pid)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "osascript", "-e", `tell application "System Events" to set visible of process "Google Chrome" to false`)
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	if err := cmd.Run(); err != nil {
-		log.Printf("Playwright: failed to hide Chrome: %v", err)
+		log.Printf("Playwright: failed to hide CDP Chrome (pid %s): %v", pid, err)
 	}
 }
 

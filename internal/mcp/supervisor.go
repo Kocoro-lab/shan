@@ -387,8 +387,8 @@ func (s *Supervisor) serverLoop(ctx context.Context, name string, entry *serverE
 // the on-demand ProbeNow path, never from periodic probes.
 func (s *Supervisor) attemptReconnect(ctx context.Context, name string, entry *serverEntry) {
 	// CDP mode: ensure Chrome has the debug port before reconnecting playwright.
-	// Chrome may have been restarted without the flag since the last connection.
-	if name == "playwright" && IsPlaywrightCDPMode(entry.config) {
+	// Only when keepAlive is true — keepAlive=false defers Chrome launch to tool invocation.
+	if name == "playwright" && IsPlaywrightCDPMode(entry.config) && entry.config.KeepAlive {
 		if err := EnsureChromeDebugPort(DefaultCDPPort); err != nil {
 			log.Printf("[mcp-supervisor] %s: Chrome CDP unavailable: %v", name, err)
 			return
@@ -424,10 +424,10 @@ func (s *Supervisor) attemptReconnect(ctx context.Context, name string, entry *s
 // while Chrome/Bridge is still unavailable.
 func (s *Supervisor) runTransportProbe(ctx context.Context, name string, entry *serverEntry) {
 	// CDP mode: proactively check if the CDP Chrome is still alive.
-	// If it died (user quit, crash), relaunch it minimized BEFORE probing
-	// the MCP transport. This keeps the endpoint available so playwright-mcp
-	// can reconnect seamlessly — no fragile error-string matching needed.
-	if name == "playwright" && IsPlaywrightCDPMode(entry.config) {
+	// Only relaunch when keepAlive is true (eager mode). When keepAlive is false,
+	// Chrome launches on-demand at first tool invocation — the supervisor should
+	// not auto-relaunch it between uses.
+	if name == "playwright" && IsPlaywrightCDPMode(entry.config) && entry.config.KeepAlive {
 		if !IsChromeCDPReachable(DefaultCDPPort) {
 			log.Printf("[mcp-supervisor] CDP Chrome unreachable — relaunching minimized")
 			if err := LaunchCDPChrome(DefaultCDPPort); err != nil {
