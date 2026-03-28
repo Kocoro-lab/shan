@@ -142,13 +142,8 @@ func LoadAgent(agentsDir, name string) (*Agent, error) {
 	attachedNames, hasManifest := loadAttachedSkills(filepath.Join(dir, "_attached.yaml"))
 	if hasManifest && len(attachedNames) > 0 {
 		globalSkillsDir := filepath.Join(shannonDir, "skills")
-		bundledSrc, err := skills.BundledSkillSource(shannonDir)
-		if err != nil {
-			return nil, fmt.Errorf("agent %q: failed to load bundled skills: %w", name, err)
-		}
 		allSkills, err := skills.LoadSkills(
 			skills.SkillSource{Dir: globalSkillsDir, Source: "global"},
-			bundledSrc,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("agent %q: bad skills: %w", name, err)
@@ -264,15 +259,11 @@ func loadAgentCommands(dir string) map[string]string {
 }
 
 // LoadGlobalSkills loads skills from the global skills directory (~/.shannon/skills/).
+// Only installed (global) skills are returned — bundled skills must be explicitly installed first.
 func LoadGlobalSkills(shannonDir string) ([]*skills.Skill, error) {
 	globalSkillsDir := filepath.Join(shannonDir, "skills")
-	bundledSrc, err := skills.BundledSkillSource(shannonDir)
-	if err != nil {
-		return nil, err
-	}
 	return skills.LoadSkills(
 		skills.SkillSource{Dir: globalSkillsDir, Source: "global"},
-		bundledSrc,
 	)
 }
 

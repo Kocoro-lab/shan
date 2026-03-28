@@ -783,14 +783,6 @@ func (s *Server) resolveSkillDir(name string) (string, string, bool, error) {
 	if _, err := os.Stat(filepath.Join(globalDir, "SKILL.md")); err == nil {
 		return globalDir, skills.SourceGlobal, false, nil
 	}
-	bundled, err := skills.BundledSkillSource(s.deps.ShannonDir)
-	if err != nil {
-		return "", "", false, err
-	}
-	bundledDir := filepath.Join(bundled.Dir, name)
-	if _, err := os.Stat(filepath.Join(bundledDir, "SKILL.md")); err == nil {
-		return bundledDir, skills.SourceBundled, true, nil
-	}
 	return "", "", false, os.ErrNotExist
 }
 
