@@ -167,11 +167,16 @@ func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *co
 
 	mcpServers := resolveMCPServers(cfg, agentDef...)
 
-	// CDP mode: ensure Chrome has the debug port before connecting playwright.
+	// CDP mode: ensure Chrome has the debug port before connecting playwright,
+	// but only when keepAlive is true (eager mode). When keepAlive is false,
+	// playwright-mcp starts without Chrome for tool discovery, then disconnects.
+	// Chrome launches on-demand at first tool invocation.
 	if pwCfg, hasPW := mcpServers["playwright"]; hasPW && !pwCfg.Disabled && mcp.IsPlaywrightCDPMode(pwCfg) {
-		if err := mcp.EnsureChromeDebugPort(mcp.DefaultCDPPort); err != nil {
-			log.Printf("Playwright CDP: Chrome debug port unavailable: %v — skipping", err)
-			delete(mcpServers, "playwright")
+		if pwCfg.KeepAlive {
+			if err := mcp.EnsureChromeDebugPort(mcp.DefaultCDPPort); err != nil {
+				log.Printf("Playwright CDP: Chrome debug port unavailable: %v — skipping", err)
+				delete(mcpServers, "playwright")
+			}
 		}
 	}
 
@@ -207,10 +212,10 @@ func CompleteRegistration(ctx context.Context, gw *client.GatewayClient, cfg *co
 				reg.Remove(legacy)
 			}
 			log.Printf("Playwright MCP connected — disabled legacy browser/automation tools")
-			// CDP mode: keep playwright-mcp alive — it's just a lightweight WebSocket
-			// to Chrome. Killing and respawning it wastes time and causes flicker.
-			// Non-CDP / non-keep_alive: disconnect after tool discovery.
-			if cfg, ok := mcpMgr.ConfigFor("playwright"); ok && !cfg.KeepAlive && !mcp.IsPlaywrightCDPMode(cfg) {
+			// When keepAlive is false, disconnect playwright after tool discovery.
+			// It will reconnect on-demand at first tool invocation.
+			// When keepAlive is true, keep the connection alive to avoid latency.
+			if cfg, ok := mcpMgr.ConfigFor("playwright"); ok && !cfg.KeepAlive {
 				mcpMgr.Disconnect("playwright")
 				log.Printf("Playwright MCP disconnected — will reconnect on demand")
 			}

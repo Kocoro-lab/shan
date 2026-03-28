@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,10 @@ const (
 	// DefaultCDPPort is the default Chrome DevTools Protocol debugging port.
 	DefaultCDPPort = 9222
 )
+
+// cdpMu serializes all EnsureChromeDebugPort calls to prevent concurrent
+// callers (boot, tool call, supervisor) from racing to launch/kill Chrome.
+var cdpMu sync.Mutex
 
 // IsChromeCDPReachable checks if Chrome's CDP endpoint is responding on the given port.
 func IsChromeCDPReachable(port int) bool {
@@ -30,7 +35,10 @@ func IsChromeCDPReachable(port int) bool {
 
 // EnsureChromeDebugPort checks if Chrome's CDP is reachable; if not, launches
 // a CDP Chrome instance (minimized). Returns nil if CDP is available after the call.
+// Serialized — concurrent callers block rather than racing to launch Chrome.
 func EnsureChromeDebugPort(port int) error {
+	cdpMu.Lock()
+	defer cdpMu.Unlock()
 	if IsChromeCDPReachable(port) {
 		return nil
 	}
@@ -51,10 +59,36 @@ func LaunchCDPChrome(port int) error {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	cdpDataDir := filepath.Join(home, ".shannon", "chrome-cdp")
-	srcProfile := filepath.Join(home, "Library", "Application Support", "Google", "Chrome")
 
-	if err := prepareCDPProfile(srcProfile, cdpDataDir); err != nil {
-		return fmt.Errorf("failed to prepare CDP profile: %w", err)
+	// If a CDP Chrome is already running with our profile, give it a few seconds
+	// to respond. If it doesn't, kill it and relaunch — the CDP port may be stuck.
+	if cdpChromePID() != "" {
+		log.Printf("[chrome-cdp] Chrome already running, checking CDP on port %d", port)
+		for i := 0; i < 6; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if IsChromeCDPReachable(port) {
+				return nil
+			}
+		}
+		log.Printf("[chrome-cdp] CDP not responding, killing stale Chrome and relaunching")
+		StopCDPChrome()
+		// Wait for Chrome to fully exit and release profile locks
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if cdpChromePID() == "" {
+				break
+			}
+		}
+	}
+
+	// Only seed the CDP profile on first launch — copying into an existing
+	// profile while Chrome is running can corrupt lock files.
+	cookiesPath := filepath.Join(cdpDataDir, "Default", "Cookies")
+	if _, err := os.Stat(cookiesPath); err != nil {
+		srcProfile := filepath.Join(home, "Library", "Application Support", "Google", "Chrome")
+		if err := prepareCDPProfile(srcProfile, cdpDataDir); err != nil {
+			return fmt.Errorf("failed to prepare CDP profile: %w", err)
+		}
 	}
 
 	log.Printf("[chrome-cdp] Launching CDP Chrome minimized (port %d)", port)

@@ -122,10 +122,12 @@ IMPORTANT: Do NOT use bash to run find, grep, cat, head, tail, sed, awk, or ls c
 ### Web & Network
 - http: direct HTTP requests (APIs, webhooks, simple fetches).
 - Server-side tools (web_search, web_fetch) are preferred for search and page reading — faster.
-- browser: ALWAYS use this as the FIRST choice for ANY web page interaction (opening URLs, clicking, reading, screenshotting). It is headless, fast, and runs an isolated profile. Workflow: navigate → snapshot (get refs e1, e2...) → click/type/scroll by ref → screenshot. Use browser(screenshot) to capture web pages — NEVER use the screenshot tool for web content (that captures the macOS screen, not the browser page). The ONLY reason to avoid browser tool is when the site requires login/authentication.
-- GUI tools (applescript + accessibility/screenshot/computer): ONLY use for authenticated/logged-in sites (x.com, gmail, github dashboard, banking). Do NOT use GUI tools for public web pages — use browser tool instead. Pattern: applescript to open URL in Chrome → accessibility read_tree or screenshot → interact.
-- Decision rule: "open <url>" or "go to <url>" → use browser tool FIRST. Only switch to GUI if the page requires login. When in doubt, use browser tool.
-- NEVER fabricate web page content. If browser tool returned empty content, an anti-bot warning, or errors, report the failure honestly to the user. Do NOT invent product listings, prices, reviews, or any data that was not present in the actual tool result. State clearly: "I was unable to access/extract data from [site] because [reason]."
+- browser_* tools (browser_navigate, browser_type, browser_click, browser_snapshot, browser_take_screenshot, etc.): ALWAYS use these as the FIRST choice for ANY web page interaction — opening URLs, clicking, reading, screenshotting. These run in a dedicated Chrome instance with your cookies/sessions, so they work for both public AND authenticated sites (x.com, gmail, github, banking). Workflow: browser_navigate → browser_snapshot (get refs e1, e2...) → browser_click/browser_type by ref → browser_take_screenshot.
+- NEVER use bash to open URLs (no "open -a Chrome", no "open https://..."). NEVER use computer/accessibility/applescript for web browsing when browser_* tools are available. The browser_* tools are faster, more reliable, and maintain session state.
+- NEVER kill Chrome via bash (no "pkill Chrome", no "killall Chrome"). If browser_* tools fail, report the error to the user — do NOT try to force-restart Chrome yourself.
+- computer/accessibility/applescript: ONLY use for native macOS app interaction (Finder, System Settings, etc.) — NEVER for web pages.
+- Decision rule: ANY web task → browser_* tools. No exceptions.
+- NEVER fabricate web page content. If browser_* tools returned empty content, an anti-bot warning, or errors, report the failure honestly to the user. Do NOT invent product listings, prices, reviews, or any data that was not present in the actual tool result. State clearly: "I was unable to access/extract data from [site] because [reason]."
 
 ### Planning
 - think: Use this to plan or reason through complex multi-step tasks before acting. Always use this instead of outputting plans as plain text.

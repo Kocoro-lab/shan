@@ -104,6 +104,7 @@ var daemonStartCmd = &cobra.Command{
 		go func() {
 			<-sigCh
 			log.Println("daemon: shutting down...")
+			mcp.StopCDPChrome()
 			cancel()
 		}()
 

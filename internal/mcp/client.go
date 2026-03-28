@@ -108,6 +108,14 @@ func (m *ClientManager) ConnectAll(ctx context.Context, servers map[string]MCPSe
 }
 
 // ConnectedServers returns the names of all servers that have an active client connection.
+// IsConnected returns true if the named server has an active client connection.
+func (m *ClientManager) IsConnected(serverName string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.clients[serverName]
+	return ok
+}
+
 func (m *ClientManager) ConnectedServers() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -198,9 +206,40 @@ func (m *ClientManager) connect(ctx context.Context, name string, cfg MCPServerC
 func (m *ClientManager) CallTool(ctx context.Context, serverName, toolName string, args map[string]any) (string, bool, error) {
 	m.mu.Lock()
 	c, ok := m.clients[serverName]
+	cfg, hasCfg := m.configs[serverName]
 	m.mu.Unlock()
 
-	if !ok {
+	// Lazy-start: server was discovered at boot but disconnected (keepAlive=false).
+	// Reconnect on first tool invocation, serialized per-server to avoid duplicate processes.
+	if !ok && hasCfg {
+		m.mu.Lock()
+		rmu, rmOK := m.reconnectMu[serverName]
+		if !rmOK {
+			rmu = &sync.Mutex{}
+			m.reconnectMu[serverName] = rmu
+		}
+		m.mu.Unlock()
+
+		rmu.Lock()
+		// Double-check: another goroutine may have connected while we waited.
+		m.mu.Lock()
+		c, ok = m.clients[serverName]
+		m.mu.Unlock()
+		if !ok {
+			log.Printf("[mcp] %s: not connected, attempting on-demand connect", serverName)
+			reconnectCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if _, err := m.connect(reconnectCtx, serverName, cfg); err != nil {
+				cancel()
+				rmu.Unlock()
+				return "", true, fmt.Errorf("MCP server %q on-demand connect failed: %w", serverName, err)
+			}
+			cancel()
+			m.mu.Lock()
+			c = m.clients[serverName]
+			m.mu.Unlock()
+		}
+		rmu.Unlock()
+	} else if !ok {
 		return "", true, fmt.Errorf("MCP server %q not connected", serverName)
 	}
 
