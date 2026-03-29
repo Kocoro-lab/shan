@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -350,28 +349,7 @@ func CleanupPlaywrightReconnect(ctx context.Context, mcpMgr *mcp.ClientManager) 
 	if ctx.Err() != nil {
 		return
 	}
-	hideChrome()
-}
-
-// hideChrome sends the CDP Chrome to the background so it doesn't steal focus.
-// Scoped to the daemon-owned instance by PID to avoid hiding the user's personal Chrome.
-func hideChrome() {
-	pid := mcp.CDPChromePID()
-	if pid == "" {
-		return
-	}
-	script := fmt.Sprintf(`tell application "System Events"
-	try
-		set p to first process whose unix id is %s
-		set visible of p to false
-	end try
-end tell`, pid)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
-	if err := cmd.Run(); err != nil {
-		log.Printf("Playwright: failed to hide CDP Chrome (pid %s): %v", pid, err)
-	}
+	mcp.HideCDPChrome()
 }
 
 // ResolveMCPContext builds the MCP context string scoped to the agent's servers.

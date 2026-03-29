@@ -135,6 +135,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /message", s.handleMessage)
 	mux.HandleFunc("POST /cancel", s.handleCancel)
 	mux.HandleFunc("GET /events", s.handleEvents)
+	mux.HandleFunc("GET /chrome/status", s.handleChromeStatus)
+	mux.HandleFunc("POST /chrome/show", s.handleChromeShow)
+	mux.HandleFunc("POST /chrome/hide", s.handleChromeHide)
 	mux.HandleFunc("POST /shutdown", s.handleShutdown)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", s.port))
@@ -155,6 +158,46 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) handleChromeShow(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := mcp.ShowCDPChrome(); err != nil {
+		if errors.Is(err, mcp.ErrChromeNotRunning) {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "chrome_not_running"})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		}
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "visible"})
+}
+
+func (s *Server) handleChromeHide(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := mcp.HideCDPChrome(); err != nil {
+		if errors.Is(err, mcp.ErrChromeNotRunning) {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "chrome_not_running"})
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		}
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "hidden"})
+}
+
+func (s *Server) handleChromeStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	status := mcp.GetCDPChromeStatus()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"running":     status.Running,
+		"visible":     status.Visible,
+		"probe_error": status.ProbeError,
+	})
 }
 
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
